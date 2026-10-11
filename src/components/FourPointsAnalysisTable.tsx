@@ -292,7 +292,7 @@ export const FourPointsAnalysisTable: React.FC<FourPointsAnalysisTableProps> = (
             <strong>Physical Hierarchy:</strong> Near Cell (15% R) &gt; Medium Range (50% R) &gt; Bad Radio Conditions (78% R, interference/fading dip) &gt; Cell Edge (100% R, sensitivity limit).
           </span>
           <span className="font-mono text-cyan-400/90">
-            Ver. 1.30.1
+            Ver. 1.31.1
           </span>
         </div>
       </div>

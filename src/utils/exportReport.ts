@@ -3,7 +3,7 @@ import { LinkBudgetCalculationResult, LinkBudgetInputs } from '../types/telecom'
 export function exportLinkBudgetCsv(result: LinkBudgetCalculationResult, inputs: LinkBudgetInputs) {
   const lines: string[] = [];
 
-  lines.push('=== 4G-5G LKB (3GPP Ref) Ver. 1.30.1 by RamyREDA ===');
+  lines.push('=== 4G-5G LKB (3GPP Ref) Ver.1.31.1 by RamyREDA ===');
   lines.push(`Generated: ${new Date().toISOString()}`);
   lines.push(`Technology: ${inputs.technology}`);
   lines.push(`Band: ${inputs.band} (${inputs.duplexMode})`);
@@ -28,6 +28,9 @@ export function exportLinkBudgetCsv(result: LinkBudgetCalculationResult, inputs:
   }
   lines.push(`Cell Edge Service Profile: ${result.serviceSummary.displayName}`);
   lines.push(`Target Cell Edge Throughput: DL ${result.serviceSummary.targetDlThroughputFormatted} / UL ${result.serviceSummary.targetUlThroughputFormatted}`);
+  if (result.serviceSummary.targetLatencyFormatted) {
+    lines.push(`Target Cell Edge Latency: ${result.serviceSummary.targetLatencyFormatted}`);
+  }
   lines.push(`Service 3GPP Reference: ${result.serviceSummary.standardReference}`);
   lines.push(`Propagation Model: ${inputs.propagationModel} (${inputs.environmentClutter})`);
   lines.push(`Coverage Probability: ${inputs.coverageProbability}%`);

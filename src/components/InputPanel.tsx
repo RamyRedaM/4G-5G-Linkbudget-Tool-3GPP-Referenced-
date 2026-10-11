@@ -419,7 +419,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
             {/* Pull-Down Menu: Current Service Profile */}
             <div className="space-y-1.5">
               <label className="block text-xs font-mono uppercase tracking-wider text-slate-300 font-semibold flex items-center justify-between">
-                <span>Current Service Profile (Pull-down Menu):</span>
+                <span>Current Service Profile (Choose from below):</span>
                 <span className="text-cyan-400 font-normal normal-case text-[11px]">
                   {serviceSummary.displayName}
                 </span>
@@ -926,6 +926,149 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                     </span>
                   </div>
                 </div>
+
+                {/* CUSTOM PUBLIC SAFETY PROFILE USER DEFINED PARAMETERS */}
+                {inputs.mcxProfile === 'CUSTOM_MCX' && (
+                  <div className="mt-3 pt-3 border-t border-rose-900/60 space-y-2.5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                      <span className="text-xs font-mono text-rose-300 font-semibold flex items-center gap-1.5">
+                        <Sliders className="w-3.5 h-3.5 text-rose-400" />
+                        Custom Public Safety User Defined Parameters (Inputs to Link Budget)
+                      </span>
+                      <span className="text-[10px] text-rose-400/80 font-mono">
+                        QoS Bearer Requirements · 3GPP TS 22.179 / TS 23.379
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {/* Box 1: DL Throughput */}
+                      <div className="bg-slate-950/80 border border-rose-800/70 rounded-md p-2.5">
+                        <label className="block text-[11px] font-mono text-slate-300 mb-1 flex justify-between items-center">
+                          <span className="font-semibold text-rose-200">DL Throughput</span>
+                          <span className="text-cyan-300 font-bold tabular-nums">
+                            {(inputs.mcxTargetDlMbps ?? 1.0) >= 1 ? `${(inputs.mcxTargetDlMbps ?? 1.0).toFixed(2)} Mbps` : `${Math.round((inputs.mcxTargetDlMbps ?? 1.0) * 1000)} kbps`}
+                          </span>
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            step="0.1"
+                            min="0.01"
+                            max="100"
+                            value={inputs.mcxTargetDlMbps ?? 1.0}
+                            onChange={(e) => update({ mcxTargetDlMbps: Math.max(0.01, Number(e.target.value)) })}
+                            className="w-full bg-slate-900 border border-rose-700/60 rounded px-2.5 py-1.5 text-xs text-rose-200 font-mono focus:border-rose-400 focus:outline-none"
+                            placeholder="1.0"
+                          />
+                          <span className="absolute right-2.5 top-1.5 text-[10px] text-slate-400 font-mono">Mbps</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {[0.128, 0.256, 0.5, 1.0, 2.0, 5.0].map((rate) => (
+                            <button
+                              key={rate}
+                              type="button"
+                              onClick={() => update({ mcxTargetDlMbps: rate })}
+                              className={`px-1.5 py-0.5 text-[9px] font-mono rounded border transition-colors ${
+                                (inputs.mcxTargetDlMbps ?? 1.0) === rate
+                                  ? 'bg-rose-950 border-rose-500 text-rose-200 font-bold'
+                                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                              }`}
+                            >
+                              {rate >= 1 ? `${rate}M` : `${Math.round(rate * 1000)}k`}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Box 2: UL Throughput */}
+                      <div className="bg-slate-950/80 border border-rose-800/70 rounded-md p-2.5">
+                        <label className="block text-[11px] font-mono text-slate-300 mb-1 flex justify-between items-center">
+                          <span className="font-semibold text-rose-200">UL Throughput</span>
+                          <span className="text-emerald-300 font-bold tabular-nums">
+                            {(inputs.mcxTargetUlMbps ?? 1.0) >= 1 ? `${(inputs.mcxTargetUlMbps ?? 1.0).toFixed(2)} Mbps` : `${Math.round((inputs.mcxTargetUlMbps ?? 1.0) * 1000)} kbps`}
+                          </span>
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            step="0.1"
+                            min="0.01"
+                            max="50"
+                            value={inputs.mcxTargetUlMbps ?? 1.0}
+                            onChange={(e) => update({ mcxTargetUlMbps: Math.max(0.01, Number(e.target.value)) })}
+                            className="w-full bg-slate-900 border border-rose-700/60 rounded px-2.5 py-1.5 text-xs text-rose-200 font-mono focus:border-rose-400 focus:outline-none"
+                            placeholder="1.0"
+                          />
+                          <span className="absolute right-2.5 top-1.5 text-[10px] text-slate-400 font-mono">Mbps</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {[0.064, 0.128, 0.256, 0.5, 1.0, 2.0].map((rate) => (
+                            <button
+                              key={rate}
+                              type="button"
+                              onClick={() => update({ mcxTargetUlMbps: rate })}
+                              className={`px-1.5 py-0.5 text-[9px] font-mono rounded border transition-colors ${
+                                (inputs.mcxTargetUlMbps ?? 1.0) === rate
+                                  ? 'bg-rose-950 border-rose-500 text-rose-200 font-bold'
+                                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                              }`}
+                            >
+                              {rate >= 1 ? `${rate}M` : `${Math.round(rate * 1000)}k`}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Box 3: Latency */}
+                      <div className="bg-slate-950/80 border border-rose-800/70 rounded-md p-2.5">
+                        <label className="block text-[11px] font-mono text-slate-300 mb-1 flex justify-between items-center">
+                          <span className="font-semibold text-rose-200">Latency (Delay)</span>
+                          <span className="text-amber-300 font-bold tabular-nums">
+                            {(inputs.mcxTargetLatencyMs ?? 25.0).toFixed(1)} ms
+                          </span>
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            step="1"
+                            min="1"
+                            max="200"
+                            value={inputs.mcxTargetLatencyMs ?? 25.0}
+                            onChange={(e) => update({ mcxTargetLatencyMs: Math.max(1, Number(e.target.value)) })}
+                            className="w-full bg-slate-900 border border-rose-700/60 rounded px-2.5 py-1.5 text-xs text-rose-200 font-mono focus:border-rose-400 focus:outline-none"
+                            placeholder="25"
+                          />
+                          <span className="absolute right-2.5 top-1.5 text-[10px] text-slate-400 font-mono">ms</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {[10, 15, 20, 25, 40, 60].map((lat) => (
+                            <button
+                              key={lat}
+                              type="button"
+                              onClick={() => update({ mcxTargetLatencyMs: lat })}
+                              className={`px-1.5 py-0.5 text-[9px] font-mono rounded border transition-colors ${
+                                (inputs.mcxTargetLatencyMs ?? 25.0) === lat
+                                  ? 'bg-rose-950 border-rose-500 text-rose-200 font-bold'
+                                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                              }`}
+                            >
+                              {lat}ms
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="text-[10px] text-slate-400 font-mono flex flex-wrap items-center justify-between pt-1 border-t border-slate-800/80">
+                      <span>
+                        Derived Demodulation SNR: DL <strong className="text-cyan-300">{serviceSummary.dlRequiredSnrDb.toFixed(1)} dB</strong> · UL <strong className="text-emerald-300">{serviceSummary.ulRequiredSnrDb.toFixed(1)} dB</strong> ({serviceSummary.dlAllocatedPrbs} DL / {serviceSummary.ulAllocatedPrbs} UL PRBs)
+                      </span>
+                      <span className="text-rose-300 font-semibold">
+                        Calculated Cell Edge Range: {serviceSummary.calculatedEdgeRangeKm >= 1 ? `${serviceSummary.calculatedEdgeRangeKm.toFixed(3)} km` : `${serviceSummary.calculatedEdgeRangeMeters} m`}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

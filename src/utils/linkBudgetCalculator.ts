@@ -136,6 +136,8 @@ export interface ResolvedServiceInfo {
   targetUlThroughputMbps: number;
   targetDlThroughputFormatted: string;
   targetUlThroughputFormatted: string;
+  targetLatencyMs?: number;
+  targetLatencyFormatted?: string;
   dlRequiredSnrDb: number;
   ulRequiredSnrDb: number;
   dlAllocatedSubcarriers: number;
@@ -173,6 +175,8 @@ export function resolveCellEdgeService(
   let ttiBundlingGainDb = 0;
   let repetitionGainDb = 0;
   let psdBoostDb = 0;
+  let targetLatencyMs: number | undefined = undefined;
+  let targetLatencyFormatted: string | undefined = undefined;
 
   switch (profile) {
     case 'MBB_PS_DATA': {
@@ -438,6 +442,7 @@ export function resolveCellEdgeService(
       let mcName = 'MCPTT (Mission Critical Voice)';
       let dlTarget = 0.0244;
       let ulTarget = 0.0244;
+      let latTarget = 25.0; // default MCX latency (ms)
       let baseDlSnr = -6.5;
       let baseUlSnr = -6.0;
       let ulPrbs = 1;
@@ -447,6 +452,7 @@ export function resolveCellEdgeService(
           mcName = 'MCPTT (Mission Critical Push-to-Talk - QCI 65 / 5QI 65)';
           dlTarget = 0.0244;
           ulTarget = 0.0244;
+          latTarget = 25.0;
           baseDlSnr = -6.5;
           baseUlSnr = -6.0;
           ulPrbs = 1;
@@ -455,6 +461,7 @@ export function resolveCellEdgeService(
           mcName = 'MCVideo (Mission Critical Video - QCI 67 / 5QI 67)';
           dlTarget = 1.5;
           ulTarget = 2.0;
+          latTarget = 35.0;
           baseDlSnr = -3.0;
           baseUlSnr = -2.5;
           ulPrbs = 6;
@@ -463,35 +470,54 @@ export function resolveCellEdgeService(
           mcName = 'MCData (Mission Critical Data / Telemetry - QCI 69 / 5QI 69)';
           dlTarget = 0.256;
           ulTarget = 0.256;
+          latTarget = 50.0;
           baseDlSnr = -5.0;
           baseUlSnr = -4.5;
           ulPrbs = 2;
           break;
         case 'CUSTOM_MCX':
-          mcName = 'User Defined Public Safety Profile';
-          dlTarget = inputs.mcxTargetDlMbps ?? 0.5;
-          ulTarget = inputs.mcxTargetUlMbps ?? 0.5;
-          baseDlSnr = -5.0;
-          baseUlSnr = -4.5;
-          ulPrbs = 2;
+          mcName = 'Custom Public Safety Profile (User Defined)';
+          dlTarget = inputs.mcxTargetDlMbps !== undefined ? inputs.mcxTargetDlMbps : 1.0;
+          ulTarget = inputs.mcxTargetUlMbps !== undefined ? inputs.mcxTargetUlMbps : 1.0;
+          latTarget = inputs.mcxTargetLatencyMs !== undefined ? inputs.mcxTargetLatencyMs : 25.0;
+
+          // Dynamically compute demodulation SNR requirement from target data rates
+          const dlThrOffset = Math.log10(Math.max(0.01, dlTarget / 0.5)) * 3.3;
+          const ulThrOffset = Math.log10(Math.max(0.01, ulTarget / 0.5)) * 3.3;
+          baseDlSnr = Number((-5.0 + dlThrOffset).toFixed(1));
+          baseUlSnr = Number((-4.5 + ulThrOffset).toFixed(1));
+
+          // Strict latency constraint: tighter latency (< 20 ms) limits HARQ retransmissions, requiring SNR margin
+          if (latTarget < 20) {
+            const latPenaltyDb = Number(Math.min(2.5, (20 - latTarget) * 0.15).toFixed(1));
+            baseDlSnr += latPenaltyDb;
+            baseUlSnr += latPenaltyDb;
+          }
+
+          ulPrbs = Math.max(1, Math.min(nPrbTotal, Math.ceil(ulTarget / (is5G ? 0.35 : 0.25))));
           break;
       }
 
-      if (inputs.mcxTargetDlMbps && mcProfile !== 'CUSTOM_MCX') {
+      if (inputs.mcxTargetDlMbps !== undefined && mcProfile !== 'CUSTOM_MCX') {
         dlTarget = inputs.mcxTargetDlMbps;
       }
-      if (inputs.mcxTargetUlMbps && mcProfile !== 'CUSTOM_MCX') {
+      if (inputs.mcxTargetUlMbps !== undefined && mcProfile !== 'CUSTOM_MCX') {
         ulTarget = inputs.mcxTargetUlMbps;
+      }
+      if (inputs.mcxTargetLatencyMs !== undefined && mcProfile !== 'CUSTOM_MCX') {
+        latTarget = inputs.mcxTargetLatencyMs;
       }
 
       targetDlThroughputMbps = dlTarget;
       targetUlThroughputMbps = ulTarget;
+      targetLatencyMs = latTarget;
+      targetLatencyFormatted = `${latTarget.toFixed(1)} ms`;
       dlAllocatedSubcarriers = Math.min(nPrbTotal, 50) * 12;
       ulAllocatedSubcarriers = ulPrbs * 12;
       dlRequiredSnrDb = inputs.dlRequiredSnrDb !== undefined ? inputs.dlRequiredSnrDb : baseDlSnr;
       ulRequiredSnrDb = inputs.ulRequiredSnrDb !== undefined ? inputs.ulRequiredSnrDb : baseUlSnr;
       targetResidualBlerPercent = inputs.mcxReliabilityTargetPercent ? Number((100 - inputs.mcxReliabilityTargetPercent).toFixed(2)) : 1.0;
-      description = `Public Safety: ${mcName}, BLER ${targetResidualBlerPercent}%, ${dlTarget >= 1 ? dlTarget + ' Mbps' : Math.round(dlTarget * 1000) + ' kbps'} DL / ${ulTarget >= 1 ? ulTarget + ' Mbps' : Math.round(ulTarget * 1000) + ' kbps'} UL`;
+      description = `Public Safety: ${mcName}, BLER ${targetResidualBlerPercent}%, ${dlTarget >= 1 ? dlTarget + ' Mbps' : Math.round(dlTarget * 1000) + ' kbps'} DL / ${ulTarget >= 1 ? ulTarget + ' Mbps' : Math.round(ulTarget * 1000) + ' kbps'} UL, Latency ${targetLatencyFormatted}`;
       standardReference = '3GPP TS 22.179 / TS 23.379 / TS 36.101 (Mission Critical Services)';
       break;
     }
@@ -515,6 +541,8 @@ export function resolveCellEdgeService(
     targetUlThroughputMbps,
     targetDlThroughputFormatted,
     targetUlThroughputFormatted,
+    targetLatencyMs,
+    targetLatencyFormatted,
     dlRequiredSnrDb,
     ulRequiredSnrDb,
     dlAllocatedSubcarriers,
@@ -961,7 +989,7 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
       avgDlBlerPercent: blerNear,
       dlThroughputMbps: Number((dlThrNear * (inputs.caEnabled ? caDlFactor : 1)).toFixed(1)),
       ulThroughputMbps: Number((ulThrNear * (inputs.caEnabled ? caUlFactor : 1)).toFixed(1)),
-      latencyMs: latNear,
+      latencyMs: serviceResolved.targetLatencyMs !== undefined ? Number((serviceResolved.targetLatencyMs * 0.4).toFixed(1)) : latNear,
       dlMcs: maxDlMod === '256QAM' ? '256QAM (CQI 15)' : '64QAM (CQI 10)',
       ulMcs: effectiveUlLayers > 1 ? `${effectiveUlLayers}x 64QAM (CQI 12)` : '64QAM (CQI 12)',
       mimoLayers: effectiveDlLayers
@@ -980,7 +1008,7 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
       avgDlBlerPercent: blerMed,
       dlThroughputMbps: Number((dlThrMed * (inputs.caEnabled ? caDlFactor : 1)).toFixed(1)),
       ulThroughputMbps: Number((ulThrMed * (inputs.caEnabled ? caUlFactor : 1)).toFixed(1)),
-      latencyMs: latMed,
+      latencyMs: serviceResolved.targetLatencyMs !== undefined ? Number((serviceResolved.targetLatencyMs * 0.7).toFixed(1)) : latMed,
       dlMcs: '64QAM (CQI 9)',
       ulMcs: '16QAM (CQI 7)',
       mimoLayers: Math.min(effectiveDlLayers, 2)
@@ -999,7 +1027,7 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
       avgDlBlerPercent: blerBad,
       dlThroughputMbps: dlThrBad,
       ulThroughputMbps: ulThrBad,
-      latencyMs: latBad,
+      latencyMs: serviceResolved.targetLatencyMs !== undefined ? Number((serviceResolved.targetLatencyMs * 0.9).toFixed(1)) : latBad,
       dlMcs: '16QAM/QPSK (CQI 4)',
       ulMcs: 'QPSK (CQI 3)',
       mimoLayers: 1
@@ -1022,7 +1050,7 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
       avgDlBlerPercent: serviceResolved.targetResidualBlerPercent,
       dlThroughputMbps: serviceResolved.targetDlThroughputMbps,
       ulThroughputMbps: serviceResolved.targetUlThroughputMbps,
-      latencyMs: latEdge,
+      latencyMs: serviceResolved.targetLatencyMs !== undefined ? serviceResolved.targetLatencyMs : latEdge,
       dlMcs: serviceResolved.serviceProfile === 'VONR_5G' || serviceResolved.serviceProfile === 'VOLTE_4G' ? 'QPSK (VoIP RoHC)' : 'QPSK R=0.15 (CQI 1)',
       ulMcs: serviceResolved.serviceProfile === 'VONR_5G' || serviceResolved.serviceProfile === 'VOLTE_4G' ? 'QPSK (VoIP)' : 'QPSK R=0.15 (CQI 1)',
       mimoLayers: 1
@@ -1304,6 +1332,8 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
       dlAllocatedPrbs: serviceResolved.dlAllocatedPrbs,
       ulAllocatedPrbs: serviceResolved.ulAllocatedPrbs,
       targetResidualBlerPercent: serviceResolved.targetResidualBlerPercent,
+      targetLatencyMs: serviceResolved.targetLatencyMs,
+      targetLatencyFormatted: serviceResolved.targetLatencyFormatted,
       calculatedEdgeRangeKm: maxCellRangeKm,
       calculatedEdgeRangeMeters: maxCellRangeMeters,
       standardReference: serviceResolved.standardReference

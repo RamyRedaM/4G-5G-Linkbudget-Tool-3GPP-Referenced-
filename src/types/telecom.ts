@@ -142,6 +142,7 @@ export interface LinkBudgetInputs {
   mcxProfile?: McxProfile; // 'MCPTT' (voice) | 'MCVIDEO' (video) | 'MCDATA' (data) | 'CUSTOM_MCX'
   mcxTargetDlMbps?: number; // Target DL throughput (Mbps)
   mcxTargetUlMbps?: number; // Target UL throughput (Mbps)
+  mcxTargetLatencyMs?: number; // Target Latency (ms) for Custom Public Safety Profile (e.g. 15-50 ms)
   mcxReliabilityTargetPercent?: number; // 99.0% or 99.9% (drives residual BLER to 1% or 0.1%)
   mcxHpueEnabled?: boolean; // HPUE Power Class 2 (26 dBm)
 
@@ -279,6 +280,8 @@ export interface LinkBudgetCalculationResult {
     targetUlThroughputMbps: number;
     targetDlThroughputFormatted: string;
     targetUlThroughputFormatted: string;
+    targetLatencyMs?: number;
+    targetLatencyFormatted?: string;
     dlRequiredSnrDb: number;
     ulRequiredSnrDb: number;
     dlAllocatedSubcarriers: number;
