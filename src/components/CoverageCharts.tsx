@@ -37,7 +37,7 @@ export const CoverageCharts: React.FC<CoverageChartsProps> = ({ result, inputs }
     for (let i = 1; i <= steps; i++) {
       const distKm = (i / steps) * maxDist;
       const pl = calculatePathLoss(distKm, propParams);
-      const rsrp = result.rsPowerDbm + inputs.bsAntennaGainDbi - inputs.bsFeederCableLossDb - pl;
+      const rsrp = result.rsEirpDbm - pl;
       
       // SINR approximation
       const normDist = distKm / result.maxCellRangeKm;

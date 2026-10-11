@@ -49,9 +49,19 @@ export const LinkBudgetOverview: React.FC<LinkBudgetOverviewProps> = ({ result, 
             · Δ {result.bottleneckDeltaDb.toFixed(1)} dB
           </span>
         </div>
-        <div className="mt-2 pt-2 border-t border-slate-800/80 text-[11px] text-slate-400 flex justify-between font-mono">
-          <span>DL: {result.dlMaplDb.toFixed(1)} dB</span>
-          <span>UL: {result.ulMaplDb.toFixed(1)} dB</span>
+        <div className="mt-2 pt-2 border-t border-slate-800/80 text-[11px] text-slate-400 space-y-0.5 font-mono">
+          <div className="flex justify-between">
+            <span>DL: {result.dlMaplDb.toFixed(1)} dB</span>
+            <span className="text-cyan-300">UE Sens: {result.ueRxSensitivityDbm.toFixed(1)} dBm</span>
+          </div>
+          <div className="flex justify-between">
+            <span>UL: {result.ulMaplDb.toFixed(1)} dB</span>
+            <span className="text-emerald-300">{inputs.technology === '4G' ? 'eNB' : 'gNB'} Sens: {result.bsRxSensitivityDbm.toFixed(1)} dBm</span>
+          </div>
+          <div className="flex justify-between pt-0.5 border-t border-slate-800/50 text-[10px] text-slate-400">
+            <span>Shadow Fading Margin:</span>
+            <span className="text-cyan-300 font-medium">+{result.shadowFadingMarginDb.toFixed(1)} dB (σ={inputs.shadowFadingStdDevDb.toFixed(1)} dB)</span>
+          </div>
         </div>
       </div>
 
@@ -77,9 +87,17 @@ export const LinkBudgetOverview: React.FC<LinkBudgetOverviewProps> = ({ result, 
           </span>{' '}
           at {inputs.coverageProbability}% cell edge target
         </div>
-        <div className="mt-2 pt-2 border-t border-slate-800/80 text-[11px] text-slate-400 flex justify-between font-mono">
-          <span>h_BS: {inputs.bsHeightMeters}m</span>
-          <span>h_UE: {inputs.ueHeightMeters}m</span>
+        <div className="mt-2 pt-2 border-t border-slate-800/80 text-[10px] font-mono flex items-center justify-between">
+          <span className="text-slate-400 truncate max-w-[160px]" title={result.serviceSummary.displayName}>
+            Service: {result.serviceSummary.displayName}
+          </span>
+          <span className="text-cyan-300 font-semibold">
+            {result.serviceSummary.targetDlThroughputFormatted} DL
+          </span>
+        </div>
+        <div className="pt-1 text-[10px] text-slate-500 flex justify-between font-mono">
+          <span>h_BS: {inputs.bsHeightMeters}m · h_UE: {inputs.ueHeightMeters}m</span>
+          <span className="text-emerald-400">{result.serviceSummary.targetUlThroughputFormatted} UL</span>
         </div>
       </div>
 

@@ -109,6 +109,161 @@ export const TelecomGuruGuide: React.FC<TelecomGuruGuideProps> = ({ isOpen, onCl
               <li><strong>Remedies:</strong> High-Power UE (HPUE Class 2 at +26 dBm), SRS-based 64TR UL Beamforming (combining 64 receive antenna elements to deliver up to +12.5 dB Rx gain), or Fixed Wireless Access (FWA) CPE with directional rooftop antennas.</li>
             </ul>
           </div>
+
+          {/* Section 5: Fading Margins (Slow Shadowing vs Fast Multipath Fading) */}
+          <div className="bg-slate-950/70 border border-slate-800 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-cyan-300 font-mono mb-2">
+              5. Fading Margins & Multipath Allowance
+            </h3>
+            <p className="text-slate-300 mb-2">
+              Wireless channels suffer from two distinct fading phenomena:
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <div className="bg-slate-900 p-2.5 rounded border border-slate-800">
+                <span className="text-cyan-300 font-mono font-semibold block mb-1">Slow / Shadow Fading Margin (M_SF):</span>
+                <span className="text-slate-400">
+                  Log-normal distribution (<code className="text-slate-200">M_SF = z · σ_SF</code>) caused by large obstacles, building shadowing, and terrain morphology. Standard deviations vary by environment: <strong>Rural (6.0 dB)</strong>, <strong>Suburban (7.0 dB)</strong>, <strong>Urban Macro (8.5 dB)</strong>, and <strong>Dense Urban (10.0 dB)</strong>. For a 95% edge coverage target (z = 1.64), M_SF ranges from ~9.8 dB (Rural) to ~16.4 dB (Dense Urban). <em>Directly deducted from both DL & UL MAPL</em>, reducing maximum cell range as clutter severity increases.
+                </span>
+              </div>
+              <div className="bg-slate-900 p-2.5 rounded border border-slate-800">
+                <span className="text-emerald-300 font-mono font-semibold block mb-1">Fast / Multipath Fading:</span>
+                <span className="text-slate-400">
+                  Rayleigh / Rician small-scale interference dips from multipath scattering. Independent DL and UL settings account for asymmetric base station vs handset antenna diversity and Doppler spread.
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 6: Systems Overhead & Physical Layer Control Channels */}
+          <div className="bg-slate-950/70 border border-slate-800 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-cyan-300 font-mono mb-2">
+              6. Systems Overhead & Physical Layer Control Channels (3GPP TS 38.211 / TS 38.213)
+            </h3>
+            <p className="text-slate-300 mb-2">
+              High-accuracy 3GPP Link Budgets incorporate physical layer signaling constraints and receiver frontend architectures:
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <div className="bg-slate-900 p-2.5 rounded border border-slate-800">
+                <span className="text-cyan-300 font-mono font-semibold block mb-1">Receiver Noise Figures:</span>
+                <span className="text-slate-400">
+                  <strong>DL NF (Default 7 dB):</strong> Handset/CPE low-noise amplifier degradation across active receiver chains.<br />
+                  <strong>UL NF (Default 4 dB):</strong> gNodeB / eNodeB AAU/RRU multi-carrier receiver low-noise frontend figure.
+                </span>
+              </div>
+              <div className="bg-slate-900 p-2.5 rounded border border-slate-800">
+                <span className="text-emerald-300 font-mono font-semibold block mb-1">CSI-RS Configuration:</span>
+                <span className="text-slate-400">
+                  <strong>CSI-RS Reports / Period (1 to 5):</strong> Frequency of Channel State Information reports.<br />
+                  <strong>CSI-RS for CA Periodicity (10, 20, 40, 80 slots):</strong> Beam management & Carrier Aggregation tracking interval.
+                </span>
+              </div>
+              <div className="bg-slate-900 p-2.5 rounded border border-slate-800">
+                <span className="text-cyan-300 font-mono font-semibold block mb-1">Average PDCCH Overhead (&lt; 10%):</span>
+                <span className="text-slate-400">
+                  Dynamically calculated based on channel bandwidth, active sweeping beams, CA cross-carrier scheduling, and CSI triggering occasions. Strictly bounded &lt; 10%.
+                </span>
+              </div>
+              <div className="bg-slate-900 p-2.5 rounded border border-slate-800">
+                <span className="text-emerald-300 font-mono font-semibold block mb-1">Average PUCCH Overhead (&lt; 20%):</span>
+                <span className="text-slate-400">
+                  Dynamically calculated based on CSI-RS report volume, CA slot tracking, TDD frame asymmetry (e.g. DDDSU), and HARQ-ACK codebook payload. Strictly bounded &lt; 20%.
+                </span>
+              </div>
+            </div>
+            <div className="mt-3 bg-slate-900/90 border border-slate-800 p-2.5 rounded text-xs font-mono text-slate-400">
+              <span className="text-cyan-300 font-semibold">4G LTE Simplification:</span> When 4G / LTE is selected, 5G-only controls (DMRS symbols per slot, Sweeping Beams, SSB burst cycle, CSI-RS reporting, and CSI-RS CA periodicity) are hidden to maintain a streamlined interface, adopting 3GPP Release 8-14 defaults (CRS 4-port grid and LTE control region).
+            </div>
+          </div>
+
+          {/* Section 7: 3GPP Receiver Sensitivity Formulation (TS 38.101, TS 38.104, TS 36.101, TS 36.104) */}
+          <div className="bg-slate-950/70 border border-slate-800 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-cyan-300 font-mono mb-2">
+              7. 3GPP Receiver Sensitivity Formulation & MAPL Derivation
+            </h3>
+            <p className="text-slate-300 mb-2">
+              In 3GPP specifications, Receiver Sensitivity (P_sens in dBm) is the minimum received RF signal power required at the receiver antenna connector to achieve demodulation error rate criteria for a given service at the cell edge:
+            </p>
+            <div className="bg-slate-900 p-3 rounded border border-slate-800 font-mono text-cyan-300 text-[11px] overflow-x-auto space-y-1.5">
+              <div>P_sens (dBm) = P_thermal_sc + 10 · log₁₀(N_sc) + NF + SNR_req - G_rx_gain</div>
+              <div className="text-slate-400 text-[10px]">
+                where P_thermal_sc = -174 + 10 · log₁₀(SCS_Hz) dBm/SC
+              </div>
+            </div>
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <div className="bg-slate-900 p-2.5 rounded border border-slate-800">
+                <span className="text-cyan-300 font-mono font-semibold block mb-1">5G NR Numerology:</span>
+                <span className="text-slate-400 leading-relaxed">
+                  • 30 kHz SCS (FR1 Sub-6): P_thermal_sc = <strong>-129.23 dBm/SC</strong><br />
+                  • 15 kHz SCS (Low Band): P_thermal_sc = <strong>-132.24 dBm/SC</strong><br />
+                  • 120 kHz SCS (FR2 mmWave): P_thermal_sc = <strong>-123.21 dBm/SC</strong><br />
+                  • DL: N_sc over channel bandwidth vs UL: cell-edge allocation (typically 24 SCs = 2 PRBs).
+                </span>
+              </div>
+              <div className="bg-slate-900 p-2.5 rounded border border-slate-800">
+                <span className="text-emerald-300 font-mono font-semibold block mb-1">4G LTE Formulation:</span>
+                <span className="text-slate-400 leading-relaxed">
+                  • Fixed 15 kHz SCS: P_thermal_sc = <strong>-132.24 dBm/SC</strong><br />
+                  • DL: N_sc = 12 · N_PRB (e.g. 1200 SCs for 20 MHz)<br />
+                  • UL: N_sc = 24 SCs (2 PRB cell edge SC-FDMA transmission)<br />
+                  • G_rx_gain: Multi-antenna receive diversity (2Rx MRC = +3.0 dB, 4Rx = +6.0 dB).
+                </span>
+              </div>
+            </div>
+            <div className="mt-3 pt-2.5 border-t border-slate-800/80 text-[11px] font-mono text-slate-400">
+              <strong className="text-slate-200">Impact on MAPL & Cell Range:</strong><br />
+              MAPL_DL = BS_EIRP + UE_Gain - BodyLoss - P_sens,UE - Margins_DL<br />
+              MAPL_UL = UE_EIRP + BS_Gain - FeederLoss - P_sens,BS - Margins_UL<br />
+              System MAPL = min(MAPL_DL, MAPL_UL) → Inverted through Standard Propagation Model (SPM) to calculate Max Cell Radius (R_max).
+            </div>
+          </div>
+
+          {/* Section 8: Cell Edge Service Profiles & 3GPP Requirements */}
+          <div className="bg-slate-950/70 border border-slate-800 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-cyan-300 font-mono mb-2">
+              8. 3GPP Cell-Edge Service Profiles & Requirements Engine
+            </h3>
+            <p className="text-slate-300 mb-2">
+              Cell range is intrinsically bounded by the required service at the cell edge. The link budget engine models 6 distinct 3GPP service profiles:
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <div className="bg-slate-900 p-2.5 rounded border border-slate-800">
+                <span className="text-cyan-300 font-mono font-semibold block mb-1">1. MBB PS DATA (Mobile Broadband):</span>
+                <span className="text-slate-400">
+                  User defined DL / UL throughput targets at cell edge (e.g. 2.0 Mbps DL / 512 kbps UL). Required SNR and PRB allocations dynamically scale to meet spectral efficiency bounds under QPSK modulation.
+                </span>
+              </div>
+              <div className="bg-slate-900 p-2.5 rounded border border-slate-800">
+                <span className="text-emerald-300 font-mono font-semibold block mb-1">2. VoNR Service in 5G (3GPP TS 26.114):</span>
+                <span className="text-slate-400">
+                  EVS-WB (13.2 / 24.4 kbps) and AMR-WB codecs with 20ms speech frames, RoHC header compression, 1 PRB (12 SCs), 4-slot aggregation (+3.6 dB bundling gain), strict 1.0% residual BLER (5QI 1 delay &lt; 100ms).
+                </span>
+              </div>
+              <div className="bg-slate-900 p-2.5 rounded border border-slate-800">
+                <span className="text-cyan-300 font-mono font-semibold block mb-1">3. VoLTE Service in 4G (3GPP TS 26.114):</span>
+                <span className="text-slate-400">
+                  AMR-WB (12.65 / 23.85 kbps) HD voice over LTE with 4-subframe TTI Bundling (+4.0 dB link headroom in UL), 1 PRB (180 kHz), strict 1.0% residual BLER (QCI 1 delay &lt; 100ms).
+                </span>
+              </div>
+              <div className="bg-slate-900 p-2.5 rounded border border-slate-800">
+                <span className="text-amber-300 font-mono font-semibold block mb-1">4. NB-IoT for 4G (3GPP TS 36.211):</span>
+                <span className="text-slate-400">
+                  In-Band (+6 dB power boost), Guard-Band, or Standalone 200 kHz. Single-Tone modes (15 kHz or 3.75 kHz) concentrate 23 dBm UE Tx power (+10.8 to +16.8 dB PSD boost!). Coverage Enhancement levels (CE 0, 1, 2) achieve up to 164 dB MCL for extreme basement penetration.
+                </span>
+              </div>
+              <div className="bg-slate-900 p-2.5 rounded border border-slate-800">
+                <span className="text-violet-300 font-mono font-semibold block mb-1">5. RedCap for 5G (3GPP Rel-17 TS 38.101-1):</span>
+                <span className="text-slate-400">
+                  NR Reduced Capability for Smart Wearables, Industrial Wireless Sensors, and Video Surveillance. Capped to 20 MHz BWP with 1Rx or 2Rx architecture (65% lower modem complexity) and 64QAM modulation cap.
+                </span>
+              </div>
+              <div className="bg-slate-900 p-2.5 rounded border border-slate-800">
+                <span className="text-rose-300 font-mono font-semibold block mb-1">6. MCX / Public Safety (3GPP TS 22.179 / TS 23.379):</span>
+                <span className="text-slate-400">
+                  Mission Critical Push-to-Talk (MCPTT QCI/5QI 65), MCVideo (QCI/5QI 67), and MCData (QCI/5QI 69) with 99.9% packet delivery reliability (0.1% BLER) and High-Power UE (HPUE Class 2 at +26 dBm / 400 mW).
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Footer */}

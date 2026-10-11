@@ -3,15 +3,51 @@ import { LinkBudgetCalculationResult, LinkBudgetInputs } from '../types/telecom'
 export function exportLinkBudgetCsv(result: LinkBudgetCalculationResult, inputs: LinkBudgetInputs) {
   const lines: string[] = [];
 
-  lines.push('=== 4G-5G LinkBudget (3GPP Referenced) by RamyREDA ===');
+  lines.push('=== 4G-5G LKB (3GPP Ref) Ver. 1.30.1 by RamyREDA ===');
   lines.push(`Generated: ${new Date().toISOString()}`);
   lines.push(`Technology: ${inputs.technology}`);
   lines.push(`Band: ${inputs.band} (${inputs.duplexMode})`);
+  if (inputs.duplexMode === 'TDD') {
+    if (inputs.tddFrameRatio === 'CUSTOM') {
+      lines.push(`TDD Frame Ratio: Customized TDD (${inputs.customTddDlPercent ?? 75}% DL / ${inputs.customTddUlPercent ?? 25}% UL)`);
+    } else {
+      lines.push(`TDD Frame Ratio: ${inputs.tddFrameRatio}`);
+    }
+  }
   lines.push(`Bandwidth: ${inputs.bandwidthMHz} MHz`);
   lines.push(`Max DL Modulation: ${inputs.maxDlModulation || '256QAM'}`);
+  if (inputs.technology !== '4G') {
+    lines.push(`Residual BLER Target: ${inputs.residualBlerTargetPercent ?? 10}%`);
+    lines.push(`5G DMRS Symbols/Slot: ${inputs.dmrsSymbolsPerSlot ?? 1}`);
+    lines.push(`5G Number of Beams: ${inputs.numberOfBeams ?? 1}`);
+    lines.push(`5G SSB Periodicity: ${inputs.ssbPeriodicityMs ?? 20} ms`);
+    lines.push(`5G CSI-RS Reports / Period: ${inputs.csiRsReportsPerPeriod ?? 2}`);
+    lines.push(`5G CSI-RS for CA Periodicity: ${inputs.csiRsCaPeriodicitySlots ?? 20} slots`);
+  } else {
+    lines.push(`4G LTE Reference Signals: 4-Port CRS & SC-FDMA DMRS (3GPP Defaults)`);
+  }
+  lines.push(`Cell Edge Service Profile: ${result.serviceSummary.displayName}`);
+  lines.push(`Target Cell Edge Throughput: DL ${result.serviceSummary.targetDlThroughputFormatted} / UL ${result.serviceSummary.targetUlThroughputFormatted}`);
+  lines.push(`Service 3GPP Reference: ${result.serviceSummary.standardReference}`);
   lines.push(`Propagation Model: ${inputs.propagationModel} (${inputs.environmentClutter})`);
   lines.push(`Coverage Probability: ${inputs.coverageProbability}%`);
-  lines.push(`System MAPL: ${result.systemMaplDb.toFixed(1)} dB`);
+  lines.push(`Log-Normal Fading Std Dev (sigma): ${inputs.shadowFadingStdDevDb.toFixed(1)} dB`);
+  lines.push(`Shadow Fading Margin (M_SF): ${result.shadowFadingMarginDb.toFixed(1)} dB`);
+  lines.push(`DL Fading Margin: ${result.dlFadingMarginDb.toFixed(1)} dB`);
+  lines.push(`UL Fading Margin: ${result.ulFadingMarginDb.toFixed(1)} dB`);
+  lines.push(`DL Noise Figure: ${(inputs.dlNoiseFigureDb ?? inputs.ueNoiseFigureDb ?? 7.0).toFixed(1)} dB`);
+  lines.push(`UL Noise Figure: ${(inputs.ulNoiseFigureDb ?? inputs.bsNoiseFigureDb ?? 4.0).toFixed(1)} dB`);
+  lines.push(`DL Thermal Noise per Subcarrier: ${result.rxSensitivityBreakdown.dl.thermalNoisePerSubcarrierDbm.toFixed(2)} dBm/SC (${result.rxSensitivityBreakdown.dl.scsKhz} kHz SCS)`);
+  lines.push(`DL Received Subcarriers: ${result.rxSensitivityBreakdown.dl.receivedSubcarriers} SCs`);
+  lines.push(`DL Required SNR @ Cell Edge: ${result.rxSensitivityBreakdown.dl.requiredSnrDb.toFixed(1)} dB`);
+  lines.push(`DL UE Receiver Sensitivity: ${result.ueRxSensitivityDbm.toFixed(1)} dBm`);
+  lines.push(`UL Thermal Noise per Subcarrier: ${result.rxSensitivityBreakdown.ul.thermalNoisePerSubcarrierDbm.toFixed(2)} dBm/SC (${result.rxSensitivityBreakdown.ul.scsKhz} kHz SCS)`);
+  lines.push(`UL Allocated Subcarriers: ${result.rxSensitivityBreakdown.ul.receivedSubcarriers} SCs (${result.rxSensitivityBreakdown.ul.allocatedPrbs} PRBs)`);
+  lines.push(`UL Required SNR @ Cell Edge: ${result.rxSensitivityBreakdown.ul.requiredSnrDb.toFixed(1)} dB`);
+  lines.push(`UL ${inputs.technology === '4G' ? 'eNodeB' : 'gNodeB'} Receiver Sensitivity: ${result.bsRxSensitivityDbm.toFixed(1)} dBm`);
+  lines.push(`Average PDCCH Overhead: ${result.avgPdcchOverheadPercent.toFixed(2)}% (< 10%)`);
+  lines.push(`Average PUCCH Overhead: ${result.avgPucchOverheadPercent.toFixed(2)}% (< 20%)`);
+  lines.push(`System MAPL: ${result.systemMaplDb.toFixed(1)} dB (DL MAPL: ${result.dlMaplDb.toFixed(1)} dB, UL MAPL: ${result.ulMaplDb.toFixed(1)} dB)`);
   lines.push(`Bottleneck: ${result.bottleneck} (Delta: ${result.bottleneckDeltaDb.toFixed(1)} dB)`);
   lines.push(`Max Cell Radius: ${result.maxCellRangeKm.toFixed(3)} km (${result.maxCellRangeMeters} meters)`);
   lines.push('');

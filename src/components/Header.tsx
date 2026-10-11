@@ -25,7 +25,7 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center gap-3">
           <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 ring-4 ring-cyan-400/20" />
           <span className="text-sm sm:text-base font-semibold tracking-tight text-white font-mono">
-            4G-5G LinkBudget (3GPP Referenced) <span className="text-cyan-400 font-normal">by RamyREDA</span>
+            4G-5G LKB (3GPP Ref) Ver. 1.30.1 <span className="text-cyan-400 font-normal">by RamyREDA</span>
           </span>
         </div>
 
@@ -40,6 +40,16 @@ export const Header: React.FC<HeaderProps> = ({
             }`}
           >
             4-Points Coverage
+          </button>
+          <button
+            onClick={() => onTabChange('mimo')}
+            className={`px-3 py-1.5 rounded-md transition-colors ${
+              currentTab === 'mimo'
+                ? 'bg-slate-800 text-cyan-300 font-semibold shadow-xs'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+            }`}
+          >
+            MIMO & Beamforming
           </button>
           <button
             onClick={() => onTabChange('waterfall')}

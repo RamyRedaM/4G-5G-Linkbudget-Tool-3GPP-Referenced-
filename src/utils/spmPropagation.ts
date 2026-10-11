@@ -55,6 +55,18 @@ export function calculateShadowFadingMargin(
   return Number((z * sigma).toFixed(2));
 }
 
+/**
+ * Inverse calculation: determine equivalent log-normal standard deviation (sigma) from margin and coverage probability
+ */
+export function calculateStdDevFromMargin(
+  marginDb: number,
+  coverageProbPercent: number = 95
+): number {
+  const z = getGaussianZ(coverageProbPercent);
+  if (z <= 0) return 0;
+  return Number((Math.max(0, marginDb) / z).toFixed(2));
+}
+
 export function getBuildingPenetrationLoss(scenario: IndoorOutdoorScenario, freqMHz: number): number {
   const fGhz = Math.max(0.7, freqMHz / 1000);
   switch (scenario) {

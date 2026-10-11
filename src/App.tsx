@@ -9,6 +9,7 @@ import { LinkBudgetOverview } from './components/LinkBudgetOverview';
 import { FourPointsAnalysisTable } from './components/FourPointsAnalysisTable';
 import { ThroughputGraph } from './components/ThroughputGraph';
 import { InputPanel } from './components/InputPanel';
+import { MimoTradeoffAnalysis } from './components/MimoTradeoffAnalysis';
 import { LinkBudgetWaterfall } from './components/LinkBudgetWaterfall';
 import { CoverageCharts } from './components/CoverageCharts';
 import { TelecomGuruGuide } from './components/TelecomGuruGuide';
@@ -59,15 +60,39 @@ export default function App() {
 
             {/* Dedicated Graph for DL / UL Thrpt Values (Mbps) */}
             <ThroughputGraph fourPoints={result.fourPoints} result={result} />
+
+            {/* MIMO & Beamforming Gain/Complexity Trade-offs Analysis */}
+            <MimoTradeoffAnalysis
+              result={result}
+              inputs={inputs}
+              onUpdateInputs={(partial) => setInputs(prev => ({ ...prev, ...partial }))}
+            />
             
             {/* Embedded SPM Propagation Curve Snapshot */}
             <CoverageCharts result={result} inputs={inputs} />
           </div>
         )}
 
+        {currentTab === 'mimo' && (
+          <div className="space-y-6">
+            {/* Full-width dedicated MIMO & Beamforming Analyzer */}
+            <MimoTradeoffAnalysis
+              result={result}
+              inputs={inputs}
+              onUpdateInputs={(partial) => setInputs(prev => ({ ...prev, ...partial }))}
+            />
+
+            {/* Dedicated Graph for DL / UL Thrpt Values (Mbps) */}
+            <ThroughputGraph fourPoints={result.fourPoints} result={result} />
+
+            {/* Coverage Table summary */}
+            <FourPointsAnalysisTable fourPoints={result.fourPoints} result={result} />
+          </div>
+        )}
+
         {currentTab === 'waterfall' && (
           <div className="space-y-6">
-            <LinkBudgetWaterfall cascadeTable={result.cascadeTable} result={result} />
+            <LinkBudgetWaterfall cascadeTable={result.cascadeTable} result={result} inputs={inputs} />
           </div>
         )}
 
@@ -88,7 +113,7 @@ export default function App() {
       <footer className="border-t border-slate-900 bg-slate-950 py-4 text-center text-xs text-slate-500 font-mono">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
           <span>
-            4G-5G LinkBudget (3GPP Referenced) by RamyREDA · Standard Propagation Model (SPM) Engine
+            4G-5G LKB (3GPP Ref) Ver. 1.30.1 by RamyREDA · Standard Propagation Model (SPM) Engine
           </span>
           <span className="text-slate-600">
             TS 38.101 · TS 38.104 · TS 38.901 · TS 38.306 · TS 36.101

@@ -40,7 +40,11 @@ export const FourPointsAnalysisTable: React.FC<FourPointsAnalysisTableProps> = (
         </div>
 
         {/* MAPL & Limiting Link callout */}
-        <div className="flex items-center gap-3 text-xs font-mono">
+        <div className="flex items-center gap-2.5 text-xs font-mono flex-wrap">
+          <div className="flex items-center gap-1.5 px-2.5 py-1 bg-cyan-950/60 rounded border border-cyan-800/70 text-cyan-300">
+            <span className="text-slate-400">Target Service:</span>
+            <span className="font-semibold text-cyan-200">{result.serviceSummary.displayName}</span>
+          </div>
           <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-800 rounded border border-slate-700">
             <span className="text-slate-400">System MAPL:</span>
             <span className="text-cyan-300 font-bold">{result.systemMaplDb.toFixed(1)} dB</span>
@@ -268,18 +272,28 @@ export const FourPointsAnalysisTable: React.FC<FourPointsAnalysisTableProps> = (
       </div>
 
       {/* Explanatory Technical Footer */}
-      <div className="px-5 py-3 bg-slate-900/80 border-t border-slate-800 text-[11px] text-slate-400 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Zap className="w-3.5 h-3.5 text-cyan-400" />
-          <span>
-            Cell Edge is bounded strictly by the <strong>{result.bottleneck.replace('_', ' ')}</strong> MAPL threshold of{' '}
-            <strong className="text-slate-200">{result.systemMaplDb.toFixed(1)} dB</strong>.
-          </span>
+      <div className="px-5 py-3 bg-slate-900/80 border-t border-slate-800 text-[11px] text-slate-400 space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Zap className="w-3.5 h-3.5 text-cyan-400" />
+            <span>
+              Cell Edge is bounded strictly by the <strong>{result.bottleneck.replace('_', ' ')}</strong> MAPL threshold of{' '}
+              <strong className="text-slate-200">{result.systemMaplDb.toFixed(1)} dB</strong>.
+            </span>
+          </div>
+          <div className="flex items-center gap-4 text-slate-400">
+            <span>Downlink MAPL: <strong className="text-slate-300">{result.dlMaplDb.toFixed(1)} dB</strong></span>
+            <span>Uplink MAPL: <strong className="text-slate-300">{result.ulMaplDb.toFixed(1)} dB</strong></span>
+            <span>Bottleneck Headroom: <strong className="text-amber-400">{result.bottleneckDeltaDb.toFixed(1)} dB</strong></span>
+          </div>
         </div>
-        <div className="flex items-center gap-4 text-slate-400">
-          <span>Downlink MAPL: <strong className="text-slate-300">{result.dlMaplDb.toFixed(1)} dB</strong></span>
-          <span>Uplink MAPL: <strong className="text-slate-300">{result.ulMaplDb.toFixed(1)} dB</strong></span>
-          <span>Bottleneck Headroom: <strong className="text-amber-400">{result.bottleneckDeltaDb.toFixed(1)} dB</strong></span>
+        <div className="text-[10px] text-slate-500 border-t border-slate-800/60 pt-2 flex items-center justify-between">
+          <span>
+            <strong>Physical Hierarchy:</strong> Near Cell (15% R) &gt; Medium Range (50% R) &gt; Bad Radio Conditions (78% R, interference/fading dip) &gt; Cell Edge (100% R, sensitivity limit).
+          </span>
+          <span className="font-mono text-cyan-400/90">
+            Ver. 1.30.1
+          </span>
         </div>
       </div>
     </div>

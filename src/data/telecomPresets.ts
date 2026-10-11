@@ -32,9 +32,14 @@ export const TELECOM_PRESETS: TelecomPreset[] = [
       mimoMode: '64TR',
       bsHeightMeters: 30,
       bsNoiseFigureDb: 2.5,
+      residualBlerTargetPercent: 10,
+      dmrsSymbolsPerSlot: 1,
+      numberOfBeams: 1,
+      ssbPeriodicityMs: 20,
       rsPowerAuto: true,
       rsPowerBoostDb: 0.0,
       ueType: 'HANDSET_STD',
+      ueMimoMode: '2T4R',
       ueTxPowerDbm: 23.0,
       ueAntennaGainDbi: 0.0,
       ueHeightMeters: 1.5,
@@ -45,10 +50,16 @@ export const TELECOM_PRESETS: TelecomPreset[] = [
       indoorOutdoorScenario: 'OUTDOOR_LOS',
       coverageProbability: 95,
       shadowFadingStdDevDb: 8.0,
+      dlFadingMarginDb: 2.0,
+      ulFadingMarginDb: 2.5,
       interferenceMarginDb: 3.0,
       iotMarginDb: 3.0,
       foliageLossDb: 0.0,
-      additionalPenetrationLossDb: 0.0
+      additionalPenetrationLossDb: 0.0,
+      dlNoiseFigureDb: 7.0,
+      ulNoiseFigureDb: 4.0,
+      csiRsReportsPerPeriod: 2,
+      csiRsCaPeriodicitySlots: 20
     }
   },
   {
@@ -74,9 +85,14 @@ export const TELECOM_PRESETS: TelecomPreset[] = [
       mimoMode: '4x4',
       bsHeightMeters: 45,
       bsNoiseFigureDb: 2.2,
+      residualBlerTargetPercent: 10,
+      dmrsSymbolsPerSlot: 1,
+      numberOfBeams: 1,
+      ssbPeriodicityMs: 20,
       rsPowerAuto: true,
       rsPowerBoostDb: 0.0,
       ueType: 'HANDSET_STD',
+      ueMimoMode: '1T2R',
       ueTxPowerDbm: 23.0,
       ueAntennaGainDbi: 0.0,
       ueHeightMeters: 1.5,
@@ -87,10 +103,16 @@ export const TELECOM_PRESETS: TelecomPreset[] = [
       indoorOutdoorScenario: 'OUTDOOR_LOS',
       coverageProbability: 90,
       shadowFadingStdDevDb: 6.0,
+      dlFadingMarginDb: 1.5,
+      ulFadingMarginDb: 2.0,
       interferenceMarginDb: 2.0,
       iotMarginDb: 2.5,
       foliageLossDb: 0.0,
-      additionalPenetrationLossDb: 0.0
+      additionalPenetrationLossDb: 0.0,
+      dlNoiseFigureDb: 7.0,
+      ulNoiseFigureDb: 4.0,
+      csiRsReportsPerPeriod: 2,
+      csiRsCaPeriodicitySlots: 20
     }
   },
   {
@@ -117,9 +139,14 @@ export const TELECOM_PRESETS: TelecomPreset[] = [
       mimoMode: '64TR',
       bsHeightMeters: 30,
       bsNoiseFigureDb: 2.5,
+      residualBlerTargetPercent: 10,
+      dmrsSymbolsPerSlot: 1,
+      numberOfBeams: 1,
+      ssbPeriodicityMs: 20,
       rsPowerAuto: true,
       rsPowerBoostDb: 0.0,
       ueType: 'HANDSET_HPUE',
+      ueMimoMode: '2T4R',
       ueTxPowerDbm: 26.0, // HPUE Class 2
       ueAntennaGainDbi: 0.0,
       ueHeightMeters: 1.5,
@@ -130,10 +157,16 @@ export const TELECOM_PRESETS: TelecomPreset[] = [
       indoorOutdoorScenario: 'OUTDOOR_LOS',
       coverageProbability: 95,
       shadowFadingStdDevDb: 8.0,
+      dlFadingMarginDb: 2.0,
+      ulFadingMarginDb: 2.5,
       interferenceMarginDb: 3.0,
       iotMarginDb: 3.0,
       foliageLossDb: 0.0,
-      additionalPenetrationLossDb: 0.0
+      additionalPenetrationLossDb: 0.0,
+      dlNoiseFigureDb: 7.0,
+      ulNoiseFigureDb: 4.0,
+      csiRsReportsPerPeriod: 2,
+      csiRsCaPeriodicitySlots: 20
     }
   },
   {
@@ -159,9 +192,14 @@ export const TELECOM_PRESETS: TelecomPreset[] = [
       mimoMode: '4x4',
       bsHeightMeters: 30,
       bsNoiseFigureDb: 2.5,
+      residualBlerTargetPercent: 10,
+      dmrsSymbolsPerSlot: 1,
+      numberOfBeams: 1,
+      ssbPeriodicityMs: 20,
       rsPowerAuto: true,
       rsPowerBoostDb: 0.0,
       ueType: 'HANDSET_STD',
+      ueMimoMode: '1T2R',
       ueTxPowerDbm: 23.0,
       ueAntennaGainDbi: 0.0,
       ueHeightMeters: 1.5,
@@ -172,10 +210,16 @@ export const TELECOM_PRESETS: TelecomPreset[] = [
       indoorOutdoorScenario: 'OUTDOOR_LOS',
       coverageProbability: 90,
       shadowFadingStdDevDb: 8.0,
+      dlFadingMarginDb: 2.0,
+      ulFadingMarginDb: 3.0,
       interferenceMarginDb: 3.0,
       iotMarginDb: 3.0,
       foliageLossDb: 0.0,
-      additionalPenetrationLossDb: 0.0
+      additionalPenetrationLossDb: 0.0,
+      dlNoiseFigureDb: 7.0,
+      ulNoiseFigureDb: 4.0,
+      csiRsReportsPerPeriod: 2,
+      csiRsCaPeriodicitySlots: 20
     }
   },
   {
@@ -201,9 +245,14 @@ export const TELECOM_PRESETS: TelecomPreset[] = [
       mimoMode: '32TR',
       bsHeightMeters: 20,
       bsNoiseFigureDb: 4.5,
+      residualBlerTargetPercent: 10,
+      dmrsSymbolsPerSlot: 1,
+      numberOfBeams: 1,
+      ssbPeriodicityMs: 20,
       rsPowerAuto: true,
       rsPowerBoostDb: 0.0,
       ueType: 'OUTDOOR_CPE',
+      ueMimoMode: '4T4R',
       ueTxPowerDbm: 27.0, // CPE high power
       ueAntennaGainDbi: 9.0, // High-gain directional CPE
       ueHeightMeters: 6.0, // Rooftop mount
@@ -214,10 +263,16 @@ export const TELECOM_PRESETS: TelecomPreset[] = [
       indoorOutdoorScenario: 'OUTDOOR_LOS',
       coverageProbability: 95,
       shadowFadingStdDevDb: 6.0,
+      dlFadingMarginDb: 1.0,
+      ulFadingMarginDb: 1.5,
       interferenceMarginDb: 2.0,
       iotMarginDb: 2.0,
       foliageLossDb: 0.0,
-      additionalPenetrationLossDb: 0.0
+      additionalPenetrationLossDb: 0.0,
+      dlNoiseFigureDb: 6.0,
+      ulNoiseFigureDb: 4.0,
+      csiRsReportsPerPeriod: 2,
+      csiRsCaPeriodicitySlots: 20
     }
   }
 ];

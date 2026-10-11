@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
-import { LinkBudgetCascadeItem, LinkBudgetCalculationResult } from '../types/telecom';
+import { LinkBudgetCascadeItem, LinkBudgetCalculationResult, LinkBudgetInputs } from '../types/telecom';
 import { ArrowDownRight, ArrowUpRight, Filter, Info, ShieldCheck, AlertCircle } from 'lucide-react';
 
 interface LinkBudgetWaterfallProps {
   cascadeTable: LinkBudgetCascadeItem[];
   result: LinkBudgetCalculationResult;
+  inputs?: LinkBudgetInputs;
 }
 
 export const LinkBudgetWaterfall: React.FC<LinkBudgetWaterfallProps> = ({
   cascadeTable,
-  result
+  result,
+  inputs
 }) => {
   const [filterCategory, setFilterCategory] = useState<string>('ALL');
 
@@ -69,7 +71,7 @@ export const LinkBudgetWaterfall: React.FC<LinkBudgetWaterfallProps> = ({
             </div>
             <div>
               <div className="text-xs font-mono uppercase tracking-wider text-slate-400">
-                Downlink MAPL (gNB → UE)
+                Downlink MAPL ({inputs?.technology === '4G' ? 'eNB' : 'gNB'} → UE)
               </div>
               <div className="text-xl font-mono font-bold text-slate-100 tabular-nums">
                 {result.dlMaplDb.toFixed(1)} <span className="text-xs text-slate-400 font-normal">dB</span>
@@ -77,8 +79,8 @@ export const LinkBudgetWaterfall: React.FC<LinkBudgetWaterfallProps> = ({
             </div>
           </div>
           <div className="text-right text-xs font-mono">
-            <div className="text-slate-400">UE Sensitivity</div>
-            <div className="text-slate-200 font-semibold">{result.ueRxSensitivityDbm.toFixed(1)} dBm</div>
+            <div className="text-slate-400">UE Sensitivity (DL)</div>
+            <div className="text-cyan-300 font-semibold">{result.ueRxSensitivityDbm.toFixed(1)} dBm</div>
           </div>
         </div>
 
@@ -89,7 +91,7 @@ export const LinkBudgetWaterfall: React.FC<LinkBudgetWaterfallProps> = ({
             </div>
             <div>
               <div className="text-xs font-mono uppercase tracking-wider text-slate-400">
-                Uplink MAPL (UE → gNB)
+                Uplink MAPL (UE → {inputs?.technology === '4G' ? 'eNB' : 'gNB'})
               </div>
               <div className="text-xl font-mono font-bold text-slate-100 tabular-nums">
                 {result.ulMaplDb.toFixed(1)} <span className="text-xs text-slate-400 font-normal">dB</span>
@@ -97,8 +99,8 @@ export const LinkBudgetWaterfall: React.FC<LinkBudgetWaterfallProps> = ({
             </div>
           </div>
           <div className="text-right text-xs font-mono">
-            <div className="text-slate-400">gNB Sensitivity</div>
-            <div className="text-slate-200 font-semibold">{result.bsRxSensitivityDbm.toFixed(1)} dBm</div>
+            <div className="text-slate-400">{inputs?.technology === '4G' ? 'eNB' : 'gNB'} Sensitivity (UL)</div>
+            <div className="text-emerald-300 font-semibold">{result.bsRxSensitivityDbm.toFixed(1)} dBm</div>
           </div>
         </div>
       </div>

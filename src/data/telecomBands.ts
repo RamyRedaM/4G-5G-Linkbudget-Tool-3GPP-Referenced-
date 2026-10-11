@@ -293,17 +293,18 @@ export const TDD_FRAME_PATTERNS = [
   { id: 'DDSUU', label: 'DDSUU (3:2 Balanced DL/UL)', dlRatio: 0.58, ulRatio: 0.38, slotPeriodMs: 2.5 },
   { id: 'DSUUU', label: 'DSUUU (1:3 UL Heavy for Surveillance/Live Broadcast)', dlRatio: 0.22, ulRatio: 0.74, slotPeriodMs: 2.5 },
   { id: 'LTE_CFG2', label: 'LTE Config 2 (DSUDDDSUDD - 8:2)', dlRatio: 0.80, ulRatio: 0.20, slotPeriodMs: 5.0 },
-  { id: 'LTE_CFG1', label: 'LTE Config 1 (DSUUDDSUUD - 6:4)', dlRatio: 0.60, ulRatio: 0.40, slotPeriodMs: 5.0 }
+  { id: 'LTE_CFG1', label: 'LTE Config 1 (DSUUDDSUUD - 6:4)', dlRatio: 0.60, ulRatio: 0.40, slotPeriodMs: 5.0 },
+  { id: 'CUSTOM', label: 'Customized TDD Frame Ratio (User Defined)', dlRatio: 0.75, ulRatio: 0.25, slotPeriodMs: 2.5 }
 ];
 
 export const MIMO_CONFIGS: Record<string, { dlLayers: number; ulLayers: number; dlBfGainDb: number; ulRxGainDb: number; desc: string }> = {
   'SISO': { dlLayers: 1, ulLayers: 1, dlBfGainDb: 0, ulRxGainDb: 0, desc: 'Single-Input Single-Output' },
-  '2x2': { dlLayers: 2, ulLayers: 1, dlBfGainDb: 0, ulRxGainDb: 3.0, desc: '2T2R Conventional Cross-Pol' },
-  '4x4': { dlLayers: 4, ulLayers: 2, dlBfGainDb: 3.0, ulRxGainDb: 6.0, desc: '4T4R Spatial Multiplexing' },
-  '8x8': { dlLayers: 4, ulLayers: 2, dlBfGainDb: 6.0, ulRxGainDb: 7.5, desc: '8T8R Sectorized / Multi-layer' },
-  '16TR': { dlLayers: 4, ulLayers: 2, dlBfGainDb: 6.0, ulRxGainDb: 8.0, desc: '16TR Lightweight Massive MIMO' },
-  '32TR': { dlLayers: 4, ulLayers: 2, dlBfGainDb: 9.0, ulRxGainDb: 10.5, desc: '32TR Massive MIMO AAU' },
-  '64TR': { dlLayers: 4, ulLayers: 2, dlBfGainDb: 12.0, ulRxGainDb: 12.5, desc: '64TR High-Density Massive MIMO AAU (Full 3D Beamforming)' }
+  '2x2': { dlLayers: 2, ulLayers: 2, dlBfGainDb: 0, ulRxGainDb: 3.0, desc: '2T2R Conventional Cross-Pol' },
+  '4x4': { dlLayers: 4, ulLayers: 4, dlBfGainDb: 3.0, ulRxGainDb: 6.0, desc: '4T4R Spatial Multiplexing' },
+  '8x8': { dlLayers: 4, ulLayers: 4, dlBfGainDb: 6.0, ulRxGainDb: 7.5, desc: '8T8R Sectorized / Multi-layer' },
+  '16TR': { dlLayers: 4, ulLayers: 4, dlBfGainDb: 6.0, ulRxGainDb: 8.0, desc: '16TR Lightweight Massive MIMO' },
+  '32TR': { dlLayers: 4, ulLayers: 4, dlBfGainDb: 9.0, ulRxGainDb: 10.5, desc: '32TR Massive MIMO AAU' },
+  '64TR': { dlLayers: 4, ulLayers: 4, dlBfGainDb: 12.0, ulRxGainDb: 12.5, desc: '64TR High-Density Massive MIMO AAU (Full 3D Beamforming)' }
 };
 
 export const POPULAR_CA_COMBOS = [
