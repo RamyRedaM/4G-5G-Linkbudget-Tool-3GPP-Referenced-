@@ -4,7 +4,7 @@ Every RF Expert knows that there is no single magic number.A cell range isnt jus
 
 So instead of sending another Excel sheet, I decided to build and publish a dedicated LKB tool to solve this E2E and give more Graphs / insights on all related involved parameters that may change the equation, and all related 3GPP based references to be vendor agnostic:
 
-👉 4G & 5G Link Budget; Coverage Calculator
+👉 4G & 5G Link Budget; Coverage Calculator (Latest Updated version is Ver.1.31.1)
 🔗 https://lnkd.in/exsr3Zs3
 
 
