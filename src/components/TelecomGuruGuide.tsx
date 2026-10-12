@@ -158,15 +158,15 @@ export const TelecomGuruGuide: React.FC<TelecomGuruGuideProps> = ({ isOpen, onCl
                 </span>
               </div>
               <div className="bg-slate-900 p-2.5 rounded border border-slate-800">
-                <span className="text-cyan-300 font-mono font-semibold block mb-1">Average PDCCH Overhead (&lt; 10%):</span>
+                <span className="text-cyan-300 font-mono font-semibold block mb-1">Average PDCCH Overhead (Dynamic &amp; Uncapped):</span>
                 <span className="text-slate-400">
-                  Dynamically calculated based on channel bandwidth, active sweeping beams, CA cross-carrier scheduling, and CSI triggering occasions. Strictly bounded &lt; 10%.
+                  Dynamically calculated from 3GPP/4GPP defined parameters: channel bandwidth, active sweeping beams, CA cross-carrier scheduling, DMRS symbols, and CSI triggering occasions. Can vary and exceed 10% under dense scheduling or narrow carriers, directly reducing PDSCH traffic share.
                 </span>
               </div>
               <div className="bg-slate-900 p-2.5 rounded border border-slate-800">
-                <span className="text-emerald-300 font-mono font-semibold block mb-1">Average PUCCH Overhead (&lt; 20%):</span>
+                <span className="text-emerald-300 font-mono font-semibold block mb-1">Average PUCCH Overhead (Dynamic &amp; Uncapped):</span>
                 <span className="text-slate-400">
-                  Dynamically calculated based on CSI-RS report volume, CA slot tracking, TDD frame asymmetry (e.g. DDDSU), and HARQ-ACK codebook payload. Strictly bounded &lt; 20%.
+                  Dynamically calculated from 3GPP/4GPP defined parameters: CSI-RS report volume, CA slot tracking, TDD frame asymmetry (e.g. DDDSU, 8:2), and HARQ-ACK codebook payload. Can vary and exceed 20% in rare asymmetric or high-CA cases, directly reducing PUSCH traffic share.
                 </span>
               </div>
             </div>

@@ -27,6 +27,7 @@ import {
   Smartphone,
   Trees,
   Settings2,
+  Target,
   ChevronDown,
   ChevronUp,
   Plus,
@@ -55,7 +56,7 @@ interface InputPanelProps {
 }
 
 export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
-  const [activeSection, setActiveSection] = useState<'tech' | 'bs' | 'ue' | 'spm' | 'ca'>('tech');
+  const [activeSection, setActiveSection] = useState<'tech' | 'service' | 'bs' | 'ue' | 'spm' | 'advanced' | 'ca'>('tech');
 
   const overheads = calculateControlOverheads(inputs);
   const lbResult = calculateLinkBudget(inputs);
@@ -217,21 +218,42 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
     let power = 23;
     let gain = 0;
     let bodyLoss = 3;
-    let nf = 8;
+    let nf = 7.5;
     let height = 1.5;
+    let mimoMode: UeMimoMode = inputs.ueMimoMode || (inputs.technology === '4G' ? '1T2R' : '2T4R');
 
     switch (ueType) {
       case 'HANDSET_STD':
-        power = 23; gain = 0; bodyLoss = 3; nf = 8; height = 1.5;
+        power = 23; gain = 0; bodyLoss = 3; nf = 7.5; height = 1.5;
+        mimoMode = inputs.ueMimoMode || (inputs.technology === '4G' ? '1T2R' : '2T4R');
         break;
       case 'HANDSET_HPUE':
-        power = 26; gain = 0; bodyLoss = 3; nf = 8; height = 1.5;
+        power = 26; gain = 0; bodyLoss = 3; nf = 7.5; height = 1.5;
+        mimoMode = '2T4R';
         break;
       case 'INDOOR_CPE':
-        power = 26; gain = 4; bodyLoss = 0; nf = 6.5; height = 2.0;
+        power = 26; gain = 4; bodyLoss = 0; nf = 6.0; height = 2.0;
+        mimoMode = inputs.ueMimoMode && inputs.ueMimoMode.startsWith('4T') ? '4T4R' : '2T4R';
         break;
       case 'OUTDOOR_CPE':
-        power = 27; gain = 9; bodyLoss = 0; nf = 5.5; height = 6.0;
+        power = 29; gain = 11; bodyLoss = 0; nf = 5.0; height = 8.0;
+        mimoMode = '4T4R';
+        break;
+      case 'INDUSTRIAL_IOT':
+        power = 26; gain = 5; bodyLoss = 0; nf = 6.0; height = 2.5;
+        mimoMode = '2T4R';
+        break;
+      case 'VEHICULAR_CPE':
+        power = 26; gain = 4; bodyLoss = 0; nf = 6.0; height = 2.0;
+        mimoMode = '2T4R';
+        break;
+      case 'MMWAVE_CPE':
+        power = 33; gain = 18; bodyLoss = 0; nf = 8.5; height = 6.0;
+        mimoMode = '4T4R';
+        break;
+      case 'REDCAP_DEVICE':
+        power = 23; gain = 0; bodyLoss = 2; nf = 8.5; height = 1.2;
+        mimoMode = '1T2R';
         break;
     }
 
@@ -241,35 +263,182 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
       ueAntennaGainDbi: gain,
       bodyLossDb: bodyLoss,
       ueNoiseFigureDb: nf,
-      ueHeightMeters: height
+      dlNoiseFigureDb: nf,
+      ueHeightMeters: height,
+      ueMimoMode: mimoMode
     });
   };
 
   const handleUeCategoryChange = (cat: UeCategory) => {
     switch (cat) {
+      case 'REL18_ADVANCED':
+        update({
+          ueCategory: cat,
+          ueType: 'HANDSET_STD',
+          ueMimoMode: '4T4R',
+          ueTxPowerDbm: 23,
+          ueAntennaGainDbi: 0,
+          bodyLossDb: 3,
+          ueNoiseFigureDb: 7.0,
+          dlNoiseFigureDb: 7.0,
+          ueHeightMeters: 1.5
+        });
+        break;
       case 'REL16_FLAGSHIP':
-        handleUeTypeChange('HANDSET_STD');
-        update({ ueCategory: cat, ueMimoMode: '2T4R', ueTxPowerDbm: 23 });
+        update({
+          ueCategory: cat,
+          ueType: 'HANDSET_STD',
+          ueMimoMode: '2T4R',
+          ueTxPowerDbm: 23,
+          ueAntennaGainDbi: 0,
+          bodyLossDb: 3,
+          ueNoiseFigureDb: 7.5,
+          dlNoiseFigureDb: 7.5,
+          ueHeightMeters: 1.5
+        });
         break;
       case 'REL15_STANDARD':
-        handleUeTypeChange('HANDSET_STD');
-        update({ ueCategory: cat, ueMimoMode: '1T4R', ueTxPowerDbm: 23 });
+        update({
+          ueCategory: cat,
+          ueType: 'HANDSET_STD',
+          ueMimoMode: '1T4R',
+          ueTxPowerDbm: 23,
+          ueAntennaGainDbi: 0,
+          bodyLossDb: 3,
+          ueNoiseFigureDb: 8.0,
+          dlNoiseFigureDb: 8.0,
+          ueHeightMeters: 1.5
+        });
         break;
       case 'HPUE_CLASS2':
-        handleUeTypeChange('HANDSET_HPUE');
-        update({ ueCategory: cat, ueMimoMode: '2T4R', ueTxPowerDbm: 26 });
+        update({
+          ueCategory: cat,
+          ueType: 'HANDSET_HPUE',
+          ueMimoMode: '2T4R',
+          ueTxPowerDbm: 26,
+          ueAntennaGainDbi: 0,
+          bodyLossDb: 3,
+          ueNoiseFigureDb: 7.5,
+          dlNoiseFigureDb: 7.5,
+          ueHeightMeters: 1.5
+        });
         break;
       case 'FWA_CPE_PRO':
-        handleUeTypeChange('OUTDOOR_CPE');
-        update({ ueCategory: cat, ueMimoMode: '4T4R', ueTxPowerDbm: 27, ueAntennaGainDbi: 9, bodyLossDb: 0 });
+        update({
+          ueCategory: cat,
+          ueType: 'OUTDOOR_CPE',
+          ueMimoMode: '4T4R',
+          ueTxPowerDbm: 29,
+          ueAntennaGainDbi: 12,
+          bodyLossDb: 0,
+          ueNoiseFigureDb: 5.0,
+          dlNoiseFigureDb: 5.0,
+          ueHeightMeters: 8.0
+        });
+        break;
+      case 'FWA_CPE_INDOOR':
+        update({
+          ueCategory: cat,
+          ueType: 'INDOOR_CPE',
+          ueMimoMode: '2T4R',
+          ueTxPowerDbm: 26,
+          ueAntennaGainDbi: 4,
+          bodyLossDb: 0,
+          ueNoiseFigureDb: 6.0,
+          dlNoiseFigureDb: 6.0,
+          ueHeightMeters: 2.0
+        });
+        break;
+      case 'INDUSTRY_4_0':
+        update({
+          ueCategory: cat,
+          ueType: 'INDUSTRIAL_IOT',
+          ueMimoMode: '2T4R',
+          ueTxPowerDbm: 26,
+          ueAntennaGainDbi: 5,
+          bodyLossDb: 0,
+          ueNoiseFigureDb: 6.0,
+          dlNoiseFigureDb: 6.0,
+          ueHeightMeters: 2.5
+        });
+        break;
+      case 'MMWAVE_PREMIUM':
+        update({
+          ueCategory: cat,
+          ueType: 'MMWAVE_CPE',
+          ueMimoMode: '4T4R',
+          ueTxPowerDbm: 33,
+          ueAntennaGainDbi: 18,
+          bodyLossDb: 0,
+          ueNoiseFigureDb: 8.5,
+          dlNoiseFigureDb: 8.5,
+          ueHeightMeters: 6.0
+        });
+        break;
+      case 'REDCAP_REL17':
+        update({
+          ueCategory: cat,
+          ueType: 'REDCAP_DEVICE',
+          ueMimoMode: '1T2R',
+          ueTxPowerDbm: 23,
+          ueAntennaGainDbi: 0,
+          bodyLossDb: 2,
+          ueNoiseFigureDb: 8.5,
+          dlNoiseFigureDb: 8.5,
+          ueHeightMeters: 1.2
+        });
+        break;
+      case 'LTE_CAT18_GIGA':
+        update({
+          ueCategory: cat,
+          ueType: 'HANDSET_STD',
+          ueMimoMode: '2T4R',
+          ueTxPowerDbm: 23,
+          ueAntennaGainDbi: 0,
+          bodyLossDb: 3,
+          ueNoiseFigureDb: 7.5,
+          dlNoiseFigureDb: 7.5,
+          ueHeightMeters: 1.5
+        });
         break;
       case 'LTE_CAT16_GIGA':
-        handleUeTypeChange('HANDSET_STD');
-        update({ ueCategory: cat, ueMimoMode: '2T4R', ueTxPowerDbm: 23 });
+        update({
+          ueCategory: cat,
+          ueType: 'HANDSET_STD',
+          ueMimoMode: '2T4R',
+          ueTxPowerDbm: 23,
+          ueAntennaGainDbi: 0,
+          bodyLossDb: 3,
+          ueNoiseFigureDb: 8.0,
+          dlNoiseFigureDb: 8.0,
+          ueHeightMeters: 1.5
+        });
         break;
       case 'LTE_CAT4_STD':
-        handleUeTypeChange('HANDSET_STD');
-        update({ ueCategory: cat, ueMimoMode: '1T2R', ueTxPowerDbm: 23, ueNoiseFigureDb: 9 });
+        update({
+          ueCategory: cat,
+          ueType: 'HANDSET_STD',
+          ueMimoMode: '1T2R',
+          ueTxPowerDbm: 23,
+          ueAntennaGainDbi: 0,
+          bodyLossDb: 3,
+          ueNoiseFigureDb: 9.0,
+          dlNoiseFigureDb: 9.0,
+          ueHeightMeters: 1.5
+        });
+        break;
+      case 'LTE_CATM1_IOT':
+        update({
+          ueCategory: cat,
+          ueType: 'REDCAP_DEVICE',
+          ueMimoMode: '1T1R',
+          ueTxPowerDbm: 23,
+          ueAntennaGainDbi: 0,
+          bodyLossDb: 0,
+          ueNoiseFigureDb: 9.0,
+          dlNoiseFigureDb: 9.0,
+          ueHeightMeters: 1.0
+        });
         break;
     }
   };
@@ -278,6 +447,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
     <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
       {/* Tab Navigation for Input Groups */}
       <div className="flex items-center gap-1.5 p-1 bg-slate-950/70 border border-slate-800 rounded-lg mb-5 overflow-x-auto text-xs">
+        {/* Tab 1: Carrier & Spectrum */}
         <button
           onClick={() => setActiveSection('tech')}
           className={`flex items-center gap-1.5 px-3 py-2 rounded-md font-medium whitespace-nowrap transition-colors ${
@@ -287,9 +457,29 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
           }`}
         >
           <Radio className="w-3.5 h-3.5" />
-          <span>1. Technology, Band & Service Profile</span>
+          <span>1. Carrier & Spectrum</span>
+          <span className="hidden xl:inline text-[10px] px-1.5 py-0.5 rounded font-mono bg-slate-900 border border-slate-700/80 text-cyan-300 ml-1">
+            {inputs.technology} · {inputs.band} ({inputs.bandwidthMHz}M)
+          </span>
         </button>
 
+        {/* Tab 2: Service Profile & QoS */}
+        <button
+          onClick={() => setActiveSection('service')}
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-md font-medium whitespace-nowrap transition-colors ${
+            activeSection === 'service'
+              ? 'bg-slate-800 text-cyan-300 font-semibold shadow-xs'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Target className="w-3.5 h-3.5" />
+          <span>2. Service Profile & QoS</span>
+          <span className="hidden xl:inline text-[10px] px-1.5 py-0.5 rounded font-mono bg-slate-900 border border-slate-700/80 text-cyan-300 ml-1">
+            {serviceSummary.displayName.split(' ')[0]} ({serviceSummary.calculatedEdgeRangeKm >= 1 ? `${serviceSummary.calculatedEdgeRangeKm.toFixed(2)}km` : `${serviceSummary.calculatedEdgeRangeMeters}m`})
+          </span>
+        </button>
+
+        {/* Tab 3: Base Station */}
         <button
           onClick={() => setActiveSection('bs')}
           className={`flex items-center gap-1.5 px-3 py-2 rounded-md font-medium whitespace-nowrap transition-colors ${
@@ -299,9 +489,13 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
           }`}
         >
           <Sliders className="w-3.5 h-3.5" />
-          <span>2. Base Station (gNB/eNB)</span>
+          <span>3. Base Station (gNB/eNB)</span>
+          <span className="hidden xl:inline text-[10px] px-1.5 py-0.5 rounded font-mono bg-slate-900 border border-slate-700/80 text-cyan-300 ml-1">
+            {inputs.bsTxPowerDbm}dBm · {inputs.mimoMode}
+          </span>
         </button>
 
+        {/* Tab 4: UE / Terminal & CPE */}
         <button
           onClick={() => setActiveSection('ue')}
           className={`flex items-center gap-1.5 px-3 py-2 rounded-md font-medium whitespace-nowrap transition-colors ${
@@ -311,9 +505,13 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
           }`}
         >
           <Smartphone className="w-3.5 h-3.5" />
-          <span>3. UE / Terminal & CPE</span>
+          <span>4. UE / Terminal & CPE</span>
+          <span className="hidden xl:inline text-[10px] px-1.5 py-0.5 rounded font-mono bg-slate-900 border border-slate-700/80 text-cyan-300 ml-1">
+            {inputs.ueType === 'HANDSET_STD' ? 'Handset' : inputs.ueType === 'HANDSET_HPUE' ? 'HPUE' : inputs.ueType === 'INDOOR_CPE' ? 'Indoor CPE' : inputs.ueType === 'OUTDOOR_CPE' ? 'Outdoor CPE' : inputs.ueType === 'INDUSTRIAL_IOT' ? 'Industrial' : inputs.ueType === 'VEHICULAR_CPE' ? 'Vehicular' : inputs.ueType === 'MMWAVE_CPE' ? 'mmWave' : 'RedCap'} · {inputs.ueTxPowerDbm}dBm · {inputs.ueMimoMode || '2T4R'}
+          </span>
         </button>
 
+        {/* Tab 5: SPM & Environment */}
         <button
           onClick={() => setActiveSection('spm')}
           className={`flex items-center gap-1.5 px-3 py-2 rounded-md font-medium whitespace-nowrap transition-colors ${
@@ -323,9 +521,29 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
           }`}
         >
           <Trees className="w-3.5 h-3.5" />
-          <span>4. SPM & Environment</span>
+          <span>5. Propagation & Clutter</span>
+          <span className="hidden xl:inline text-[10px] px-1.5 py-0.5 rounded font-mono bg-slate-900 border border-slate-700/80 text-cyan-300 ml-1">
+            {inputs.propagationModel} · {inputs.environmentClutter}
+          </span>
         </button>
 
+        {/* Tab 6: Advanced RF & Overheads */}
+        <button
+          onClick={() => setActiveSection('advanced')}
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-md font-medium whitespace-nowrap transition-colors ${
+            activeSection === 'advanced'
+              ? 'bg-slate-800 text-cyan-300 font-semibold shadow-xs'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Settings2 className="w-3.5 h-3.5" />
+          <span>6. Advanced RF & Overheads</span>
+          <span className="hidden xl:inline text-[10px] px-1.5 py-0.5 rounded font-mono bg-slate-900 border border-slate-700/80 text-cyan-300 ml-1">
+            PDCCH {overheads.avgPdcchOverheadPercent.toFixed(1)}%
+          </span>
+        </button>
+
+        {/* Tab 7: Carrier Aggregation (CA) */}
         <button
           onClick={() => setActiveSection('ca')}
           className={`flex items-center gap-1.5 px-3 py-2 rounded-md font-medium whitespace-nowrap transition-colors ${
@@ -335,9 +553,15 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
           }`}
         >
           <Layers className="w-3.5 h-3.5" />
-          <span>5. Carrier Aggregation (CA)</span>
-          {inputs.caEnabled && (
-            <span className="w-2 h-2 rounded-full bg-cyan-400" />
+          <span>7. Carrier Aggregation (CA)</span>
+          {inputs.caEnabled ? (
+            <span className="hidden xl:inline text-[10px] px-1.5 py-0.5 rounded font-mono bg-cyan-950 border border-cyan-700/80 text-cyan-300 ml-1">
+              {inputs.carriers.length}CC Active
+            </span>
+          ) : (
+            <span className="hidden xl:inline text-[10px] px-1.5 py-0.5 rounded font-mono bg-slate-900 border border-slate-700/80 text-slate-400 ml-1">
+              Disabled
+            </span>
           )}
         </button>
       </div>
@@ -395,7 +619,12 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
               </select>
             </div>
           </div>
+        </div>
+      )}
 
+      {/* SECTION 2: SERVICE PROFILE & QOS REQUIREMENTS */}
+      {activeSection === 'service' && (
+        <div className="space-y-4">
           {/* SERVICE PROFILE & CELL EDGE REQUIREMENTS (3GPP REQUIREMENT ENGINE) */}
           <div className="p-4 bg-gradient-to-r from-slate-950/95 via-cyan-950/20 to-slate-950/95 border border-cyan-800/60 rounded-lg space-y-3.5 shadow-lg relative overflow-hidden">
             <div className="absolute top-0 right-0 w-48 h-48 bg-cyan-500/5 rounded-full blur-2xl pointer-events-none" />
@@ -1119,6 +1348,12 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* SECTION 1 CONTINUED: CARRIER & SPECTRUM (Bandwidth, Modulation, TDD Frame) */}
+      {activeSection === 'tech' && (
+        <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pt-2">
             {/* Bandwidth as per 3GPP */}
             <div>
@@ -1325,7 +1560,12 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
               </div>
             </div>
           )}
+        </div>
+      )}
 
+      {/* SECTION 6: ADVANCED RF, OVERHEADS & RECEIVER SENSITIVITY */}
+      {activeSection === 'advanced' && (
+        <div className="space-y-4">
           {/* Physical Layer Numerology, Signaling & Beam Configuration */}
           {inputs.technology !== '4G' ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 pt-3 border-t border-slate-800/60">
@@ -1578,59 +1818,147 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                   </select>
                 </div>
 
-                {/* 5. Average PDCCH overhead (%) - CALCULATED (< 10%) */}
-                <div className="bg-slate-950/90 border border-cyan-800/60 rounded-lg p-3 flex flex-col justify-between relative overflow-hidden group">
-                  <div className="absolute top-0 right-0 w-16 h-16 bg-cyan-500/10 rounded-full blur-xl pointer-events-none" />
+                {/* 5. Average PDCCH overhead (%) - CALCULATED (Uncapped, can exceed 10%) */}
+                <div className={`rounded-lg p-3 flex flex-col justify-between relative overflow-hidden transition-all duration-300 group ${
+                  overheads.avgPdcchOverheadPercent > 10
+                    ? 'bg-amber-950/30 border-2 border-amber-500/80 shadow-lg shadow-amber-950/50'
+                    : 'bg-slate-950/90 border border-cyan-800/60 shadow-md shadow-cyan-950/30 hover:border-cyan-600/80'
+                }`}>
+                  <div className={`absolute top-0 right-0 w-24 h-24 rounded-full blur-xl pointer-events-none ${
+                    overheads.avgPdcchOverheadPercent > 10 ? 'bg-amber-500/15' : 'bg-cyan-500/10'
+                  }`} />
                   <div>
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="text-[11px] font-mono uppercase tracking-wider text-cyan-300 font-semibold flex items-center gap-1">
-                        <Gauge className="w-3 h-3 text-cyan-400 inline" />
+                    <div className="flex justify-between items-center mb-1 gap-1">
+                      <span className={`text-[11px] font-mono uppercase tracking-wider font-semibold flex items-center gap-1.5 ${
+                        overheads.avgPdcchOverheadPercent > 10 ? 'text-amber-300' : 'text-cyan-300'
+                      }`}>
+                        <Gauge className={`w-3.5 h-3.5 inline shrink-0 ${
+                          overheads.avgPdcchOverheadPercent > 10 ? 'text-amber-400 animate-pulse' : 'text-cyan-400'
+                        }`} />
                         Avg PDCCH Overhead
                       </span>
-                      <span className="text-[10px] font-mono font-bold text-cyan-300 bg-cyan-950/90 border border-cyan-700/60 px-1.5 py-0.5 rounded">
-                        &lt; 10%
-                      </span>
+                      {overheads.avgPdcchOverheadPercent > 10 ? (
+                        <span className="text-[10px] font-mono font-bold text-amber-200 bg-amber-950/90 border border-amber-500/70 px-1.5 py-0.5 rounded shadow-xs flex items-center gap-1 shrink-0">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping inline-block" />
+                          &gt; 10% High
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-mono font-bold text-cyan-300 bg-cyan-950/90 border border-cyan-700/60 px-1.5 py-0.5 rounded shrink-0">
+                          Uncapped Dynamic
+                        </span>
+                      )}
                     </div>
                     <p className="text-[10px] text-slate-400 font-mono mb-2">
-                      Calculated from BW, Beams, CA & DMRS
+                      3GPP dynamic function of BW, Beams, CA & DMRS
                     </p>
                   </div>
-                  <div className="bg-slate-900/90 border border-cyan-900/60 rounded p-2 text-center">
-                    <div className="text-xl font-mono font-bold text-cyan-300 tabular-nums">
+
+                  <div className={`border rounded p-2 text-center transition-colors my-1 ${
+                    overheads.avgPdcchOverheadPercent > 10
+                      ? 'bg-amber-950/50 border-amber-700/60'
+                      : 'bg-slate-900/90 border-cyan-900/60'
+                  }`}>
+                    <div className={`text-xl font-mono font-bold tabular-nums ${
+                      overheads.avgPdcchOverheadPercent > 10 ? 'text-amber-300' : 'text-cyan-300'
+                    }`}>
                       {overheads.avgPdcchOverheadPercent.toFixed(2)}%
                     </div>
                     <div className="text-[10px] font-mono text-slate-400 flex items-center justify-center gap-1 mt-0.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 inline-block"></span>
-                      <span>Dynamic DL Control (&lt; 10%)</span>
+                      <span className={`w-1.5 h-1.5 rounded-full inline-block ${
+                        overheads.avgPdcchOverheadPercent > 10 ? 'bg-amber-400' : 'bg-cyan-400'
+                      }`}></span>
+                      <span className="font-semibold text-slate-300">
+                        PDSCH Traffic Share: -{overheads.avgPdcchOverheadPercent.toFixed(2)}%
+                      </span>
                     </div>
+                  </div>
+
+                  {/* 3GPP Driver Factors Tags */}
+                  <div className="mt-1 pt-1.5 border-t border-slate-800/80 flex flex-wrap gap-1 text-[9px] font-mono text-slate-400">
+                    <span className="bg-slate-900/80 border border-slate-800 px-1.5 py-0.5 rounded text-slate-300">
+                      BW: {inputs.bandwidthMHz}MHz
+                    </span>
+                    <span className="bg-slate-900/80 border border-slate-800 px-1.5 py-0.5 rounded text-slate-300">
+                      Beams: {inputs.numberOfBeams ?? 1}
+                    </span>
+                    <span className="bg-slate-900/80 border border-slate-800 px-1.5 py-0.5 rounded text-slate-300">
+                      CA: {inputs.caEnabled ? (inputs.caCarriersCount || 1) : 1}CC
+                    </span>
+                    <span className="bg-slate-900/80 border border-slate-800 px-1.5 py-0.5 rounded text-slate-300">
+                      DMRS: {inputs.dmrsSymbolsPerSlot ?? 1}sym
+                    </span>
                   </div>
                 </div>
 
-                {/* 6. Average PUCCH overhead (%) - CALCULATED (< 20%) */}
-                <div className="bg-slate-950/90 border border-emerald-800/60 rounded-lg p-3 flex flex-col justify-between relative overflow-hidden group">
-                  <div className="absolute top-0 right-0 w-16 h-16 bg-emerald-500/10 rounded-full blur-xl pointer-events-none" />
+                {/* 6. Average PUCCH overhead (%) - CALCULATED (Uncapped, can exceed 20%) */}
+                <div className={`rounded-lg p-3 flex flex-col justify-between relative overflow-hidden transition-all duration-300 group ${
+                  overheads.avgPucchOverheadPercent > 20
+                    ? 'bg-rose-950/30 border-2 border-rose-500/80 shadow-lg shadow-rose-950/50'
+                    : 'bg-slate-950/90 border border-emerald-800/60 shadow-md shadow-emerald-950/30 hover:border-emerald-600/80'
+                }`}>
+                  <div className={`absolute top-0 right-0 w-24 h-24 rounded-full blur-xl pointer-events-none ${
+                    overheads.avgPucchOverheadPercent > 20 ? 'bg-rose-500/15' : 'bg-emerald-500/10'
+                  }`} />
                   <div>
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="text-[11px] font-mono uppercase tracking-wider text-emerald-300 font-semibold flex items-center gap-1">
-                        <Gauge className="w-3 h-3 text-emerald-400 inline" />
+                    <div className="flex justify-between items-center mb-1 gap-1">
+                      <span className={`text-[11px] font-mono uppercase tracking-wider font-semibold flex items-center gap-1.5 ${
+                        overheads.avgPucchOverheadPercent > 20 ? 'text-rose-300' : 'text-emerald-300'
+                      }`}>
+                        <Gauge className={`w-3.5 h-3.5 inline shrink-0 ${
+                          overheads.avgPucchOverheadPercent > 20 ? 'text-rose-400 animate-pulse' : 'text-emerald-400'
+                        }`} />
                         Avg PUCCH Overhead
                       </span>
-                      <span className="text-[10px] font-mono font-bold text-emerald-300 bg-emerald-950/90 border border-emerald-700/60 px-1.5 py-0.5 rounded">
-                        &lt; 20%
-                      </span>
+                      {overheads.avgPucchOverheadPercent > 20 ? (
+                        <span className="text-[10px] font-mono font-bold text-rose-200 bg-rose-950/90 border border-rose-500/70 px-1.5 py-0.5 rounded shadow-xs flex items-center gap-1 shrink-0">
+                          <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-ping inline-block" />
+                          &gt; 20% Rare Peak
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-mono font-bold text-emerald-300 bg-emerald-950/90 border border-emerald-700/60 px-1.5 py-0.5 rounded shrink-0">
+                          Uncapped Dynamic
+                        </span>
+                      )}
                     </div>
                     <p className="text-[10px] text-slate-400 font-mono mb-2">
-                      Calculated from CSI, CA slots & TDD
+                      3GPP dynamic function of CSI, CA slots & TDD
                     </p>
                   </div>
-                  <div className="bg-slate-900/90 border border-emerald-900/60 rounded p-2 text-center">
-                    <div className="text-xl font-mono font-bold text-emerald-300 tabular-nums">
+
+                  <div className={`border rounded p-2 text-center transition-colors my-1 ${
+                    overheads.avgPucchOverheadPercent > 20
+                      ? 'bg-rose-950/50 border-rose-700/60'
+                      : 'bg-slate-900/90 border-emerald-900/60'
+                  }`}>
+                    <div className={`text-xl font-mono font-bold tabular-nums ${
+                      overheads.avgPucchOverheadPercent > 20 ? 'text-rose-300' : 'text-emerald-300'
+                    }`}>
                       {overheads.avgPucchOverheadPercent.toFixed(2)}%
                     </div>
                     <div className="text-[10px] font-mono text-slate-400 flex items-center justify-center gap-1 mt-0.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></span>
-                      <span>Dynamic UL Control (&lt; 20%)</span>
+                      <span className={`w-1.5 h-1.5 rounded-full inline-block ${
+                        overheads.avgPucchOverheadPercent > 20 ? 'bg-rose-400' : 'bg-emerald-400'
+                      }`}></span>
+                      <span className="font-semibold text-slate-300">
+                        PUSCH Traffic Share: -{overheads.avgPucchOverheadPercent.toFixed(2)}%
+                      </span>
                     </div>
+                  </div>
+
+                  {/* 3GPP Driver Factors Tags */}
+                  <div className="mt-1 pt-1.5 border-t border-slate-800/80 flex flex-wrap gap-1 text-[9px] font-mono text-slate-400">
+                    <span className="bg-slate-900/80 border border-slate-800 px-1.5 py-0.5 rounded text-slate-300">
+                      TDD: {inputs.duplexMode === 'TDD' ? inputs.tddFrameRatio : 'FDD'}
+                    </span>
+                    <span className="bg-slate-900/80 border border-slate-800 px-1.5 py-0.5 rounded text-slate-300">
+                      CSI: {inputs.csiRsReportsPerPeriod ?? 2} rpts
+                    </span>
+                    <span className="bg-slate-900/80 border border-slate-800 px-1.5 py-0.5 rounded text-slate-300">
+                      Period: {inputs.csiRsCaPeriodicitySlots ?? 20} slots
+                    </span>
+                    <span className="bg-slate-900/80 border border-slate-800 px-1.5 py-0.5 rounded text-slate-300">
+                      CA: {inputs.caEnabled ? (inputs.caCarriersCount || 1) : 1}CC
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1908,58 +2236,112 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                     </div>
                   </div>
 
-                  {/* 3. Average PDCCH overhead (%) - CALCULATED (< 10%) */}
-                  <div className="bg-slate-950/90 border border-cyan-800/60 rounded-lg p-3.5 flex flex-col justify-between relative overflow-hidden group">
-                    <div className="absolute top-0 right-0 w-16 h-16 bg-cyan-500/10 rounded-full blur-xl pointer-events-none" />
+                  {/* 3. Average PDCCH overhead (%) - CALCULATED (Uncapped, can exceed 10%) */}
+                  <div className={`rounded-lg p-3.5 flex flex-col justify-between relative overflow-hidden transition-all duration-300 group ${
+                    overheads.avgPdcchOverheadPercent > 10
+                      ? 'bg-amber-950/30 border-2 border-amber-500/80 shadow-lg shadow-amber-950/50'
+                      : 'bg-slate-950/90 border border-cyan-800/60 shadow-md shadow-cyan-950/30 hover:border-cyan-600/80'
+                  }`}>
+                    <div className={`absolute top-0 right-0 w-20 h-20 rounded-full blur-xl pointer-events-none ${
+                      overheads.avgPdcchOverheadPercent > 10 ? 'bg-amber-500/15' : 'bg-cyan-500/10'
+                    }`} />
                     <div>
-                      <div className="flex justify-between items-center mb-1">
-                        <span className="text-xs font-mono uppercase tracking-wider text-cyan-300 font-semibold flex items-center gap-1">
-                          <Gauge className="w-3.5 h-3.5 text-cyan-400 inline" />
+                      <div className="flex justify-between items-center mb-1 gap-1">
+                        <span className={`text-xs font-mono uppercase tracking-wider font-semibold flex items-center gap-1.5 ${
+                          overheads.avgPdcchOverheadPercent > 10 ? 'text-amber-300' : 'text-cyan-300'
+                        }`}>
+                          <Gauge className={`w-3.5 h-3.5 inline shrink-0 ${
+                            overheads.avgPdcchOverheadPercent > 10 ? 'text-amber-400 animate-pulse' : 'text-cyan-400'
+                          }`} />
                           Avg PDCCH Overhead
                         </span>
-                        <span className="text-[10px] font-mono font-bold text-cyan-300 bg-cyan-950/90 border border-cyan-700/60 px-1.5 py-0.5 rounded">
-                          &lt; 10%
-                        </span>
+                        {overheads.avgPdcchOverheadPercent > 10 ? (
+                          <span className="text-[10px] font-mono font-bold text-amber-200 bg-amber-950/90 border border-amber-500/70 px-1.5 py-0.5 rounded shadow-xs flex items-center gap-1 shrink-0">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping inline-block" />
+                            &gt; 10% High
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-mono font-bold text-cyan-300 bg-cyan-950/90 border border-cyan-700/60 px-1.5 py-0.5 rounded shrink-0">
+                            Uncapped Dynamic
+                          </span>
+                        )}
                       </div>
                       <p className="text-[10px] text-slate-400 font-mono mb-2">
-                        3GPP LTE Control Region (1-3 OFDM symbols)
+                        3GPP LTE Control Region (1-4 OFDM symbols)
                       </p>
                     </div>
-                    <div className="bg-slate-900/90 border border-cyan-900/60 rounded p-2 text-center">
-                      <div className="text-xl font-mono font-bold text-cyan-300 tabular-nums">
+                    <div className={`border rounded p-2 text-center transition-colors my-1 ${
+                      overheads.avgPdcchOverheadPercent > 10
+                        ? 'bg-amber-950/50 border-amber-700/60'
+                        : 'bg-slate-900/90 border-cyan-900/60'
+                    }`}>
+                      <div className={`text-xl font-mono font-bold tabular-nums ${
+                        overheads.avgPdcchOverheadPercent > 10 ? 'text-amber-300' : 'text-cyan-300'
+                      }`}>
                         {overheads.avgPdcchOverheadPercent.toFixed(2)}%
                       </div>
                       <div className="text-[10px] font-mono text-slate-400 flex items-center justify-center gap-1 mt-0.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 inline-block"></span>
-                        <span>LTE Downlink PDCCH/PCFICH/PHICH</span>
+                        <span className={`w-1.5 h-1.5 rounded-full inline-block ${
+                          overheads.avgPdcchOverheadPercent > 10 ? 'bg-amber-400' : 'bg-cyan-400'
+                        }`}></span>
+                        <span className="font-semibold text-slate-300">
+                          PDSCH Traffic Share: -{overheads.avgPdcchOverheadPercent.toFixed(2)}%
+                        </span>
                       </div>
                     </div>
                   </div>
 
-                  {/* 4. Average PUCCH overhead (%) - CALCULATED (< 20%) */}
-                  <div className="bg-slate-950/90 border border-emerald-800/60 rounded-lg p-3.5 flex flex-col justify-between relative overflow-hidden group">
-                    <div className="absolute top-0 right-0 w-16 h-16 bg-emerald-500/10 rounded-full blur-xl pointer-events-none" />
+                  {/* 4. Average PUCCH overhead (%) - CALCULATED (Uncapped, can exceed 20%) */}
+                  <div className={`rounded-lg p-3.5 flex flex-col justify-between relative overflow-hidden transition-all duration-300 group ${
+                    overheads.avgPucchOverheadPercent > 20
+                      ? 'bg-rose-950/30 border-2 border-rose-500/80 shadow-lg shadow-rose-950/50'
+                      : 'bg-slate-950/90 border border-emerald-800/60 shadow-md shadow-emerald-950/30 hover:border-emerald-600/80'
+                  }`}>
+                    <div className={`absolute top-0 right-0 w-20 h-20 rounded-full blur-xl pointer-events-none ${
+                      overheads.avgPucchOverheadPercent > 20 ? 'bg-rose-500/15' : 'bg-emerald-500/10'
+                    }`} />
                     <div>
-                      <div className="flex justify-between items-center mb-1">
-                        <span className="text-xs font-mono uppercase tracking-wider text-emerald-300 font-semibold flex items-center gap-1">
-                          <Gauge className="w-3.5 h-3.5 text-emerald-400 inline" />
+                      <div className="flex justify-between items-center mb-1 gap-1">
+                        <span className={`text-xs font-mono uppercase tracking-wider font-semibold flex items-center gap-1.5 ${
+                          overheads.avgPucchOverheadPercent > 20 ? 'text-rose-300' : 'text-emerald-300'
+                        }`}>
+                          <Gauge className={`w-3.5 h-3.5 inline shrink-0 ${
+                            overheads.avgPucchOverheadPercent > 20 ? 'text-rose-400 animate-pulse' : 'text-emerald-400'
+                          }`} />
                           Avg PUCCH Overhead
                         </span>
-                        <span className="text-[10px] font-mono font-bold text-emerald-300 bg-emerald-950/90 border border-emerald-700/60 px-1.5 py-0.5 rounded">
-                          &lt; 20%
-                        </span>
+                        {overheads.avgPucchOverheadPercent > 20 ? (
+                          <span className="text-[10px] font-mono font-bold text-rose-200 bg-rose-950/90 border border-rose-500/70 px-1.5 py-0.5 rounded shadow-xs flex items-center gap-1 shrink-0">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-ping inline-block" />
+                            &gt; 20% Rare Peak
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-mono font-bold text-emerald-300 bg-emerald-950/90 border border-emerald-700/60 px-1.5 py-0.5 rounded shrink-0">
+                            Uncapped Dynamic
+                          </span>
+                        )}
                       </div>
                       <p className="text-[10px] text-slate-400 font-mono mb-2">
-                        3GPP LTE PUCCH Edge PRBs (Format 1/2)
+                        3GPP LTE PUCCH Edge PRBs (Format 1/2/3)
                       </p>
                     </div>
-                    <div className="bg-slate-900/90 border border-emerald-900/60 rounded p-2 text-center">
-                      <div className="text-xl font-mono font-bold text-emerald-300 tabular-nums">
+                    <div className={`border rounded p-2 text-center transition-colors my-1 ${
+                      overheads.avgPucchOverheadPercent > 20
+                        ? 'bg-rose-950/50 border-rose-700/60'
+                        : 'bg-slate-900/90 border-emerald-900/60'
+                    }`}>
+                      <div className={`text-xl font-mono font-bold tabular-nums ${
+                        overheads.avgPucchOverheadPercent > 20 ? 'text-rose-300' : 'text-emerald-300'
+                      }`}>
                         {overheads.avgPucchOverheadPercent.toFixed(2)}%
                       </div>
                       <div className="text-[10px] font-mono text-slate-400 flex items-center justify-center gap-1 mt-0.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></span>
-                        <span>LTE Uplink PUCCH Control Region</span>
+                        <span className={`w-1.5 h-1.5 rounded-full inline-block ${
+                          overheads.avgPucchOverheadPercent > 20 ? 'bg-rose-400' : 'bg-emerald-400'
+                        }`}></span>
+                        <span className="font-semibold text-slate-300">
+                          PUSCH Traffic Share: -{overheads.avgPucchOverheadPercent.toFixed(2)}%
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -2133,7 +2515,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
         </div>
       )}
 
-      {/* SECTION 2: BASE STATION (eNodeB / gNodeB) */}
+      {/* SECTION 3: BASE STATION (eNodeB / gNodeB) */}
       {activeSection === 'bs' && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -2337,80 +2719,127 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
         </div>
       )}
 
-      {/* SECTION 3: USER EQUIPMENT & CPE */}
+      {/* SECTION 4: USER EQUIPMENT & CPE */}
       {activeSection === 'ue' && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* UE Category Selection */}
             <div>
-              <label className="block text-xs font-mono uppercase tracking-wider text-slate-400 mb-1.5">
-                UE Device Category / 3GPP Tier
+              <label className="block text-xs font-mono uppercase tracking-wider text-slate-400 mb-1.5 flex items-center justify-between">
+                <span>UE Device Category / 3GPP Tier</span>
+                <span className="text-[10px] text-cyan-400 font-normal">TS 38.306 / 36.306</span>
               </label>
               <select
-                value={inputs.ueCategory || 'REL16_FLAGSHIP'}
+                value={inputs.ueCategory || (inputs.technology === '4G' ? 'LTE_CAT16_GIGA' : 'REL16_FLAGSHIP')}
                 onChange={(e) => handleUeCategoryChange(e.target.value as UeCategory)}
                 className="w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-100 font-mono focus:border-cyan-400 focus:outline-none"
               >
-                <option value="REL16_FLAGSHIP">5G NR Rel-16/17 Flagship (4x4 DL / 2Tx UL / 256QAM)</option>
-                <option value="REL15_STANDARD">5G NR Rel-15 Standard (4x4 DL / 1Tx UL / 256QAM)</option>
-                <option value="HPUE_CLASS2">5G High-Power UE (HPUE Class 2 - 26 dBm / 2Tx UL)</option>
-                <option value="FWA_CPE_PRO">5G FWA Outdoor CPE (4T4R Quad-Tx / 27 dBm / 9 dBi)</option>
-                <option value="LTE_CAT16_GIGA">4G LTE-A Cat 16+ Gigabit (4x4 DL / 2Tx UL)</option>
-                <option value="LTE_CAT4_STD">4G LTE Cat 4 Legacy (2x2 DL / 1Tx UL - 150/50 Mbps)</option>
+                <optgroup label="5G NR & 5G-Advanced (3GPP Rel-15 to Rel-18)">
+                  <option value="REL18_ADVANCED">5G-Advanced Rel-18 Ultra Flagship (4x4 DL / 2-4Tx UL / 1024QAM Ready)</option>
+                  <option value="REL16_FLAGSHIP">5G NR Rel-16/17 Flagship (4x4 DL / 2Tx UL MIMO / 256QAM DL)</option>
+                  <option value="REL15_STANDARD">5G NR Rel-15 Standard Smartphone (4x4 DL / 1Tx UL / 256QAM DL)</option>
+                  <option value="HPUE_CLASS2">5G High-Power UE (HPUE Class 2 - 26 dBm / 2Tx UL MIMO)</option>
+                  <option value="FWA_CPE_PRO">5G FWA High-Gain Outdoor Rooftop CPE (4T4R / 29 dBm / 12 dBi)</option>
+                  <option value="FWA_CPE_INDOOR">5G FWA Indoor Desktop CPE Gateway (2T4R / 26 dBm / 4 dBi)</option>
+                  <option value="INDUSTRY_4_0">5G Industrial Rugged Terminal / Private 5G URLLC (2T4R / 26 dBm)</option>
+                  <option value="MMWAVE_PREMIUM">5G mmWave Fixed Wireless Terminal (FR2 Power Class 1 / 18 dBi)</option>
+                  <option value="REDCAP_REL17">5G RedCap Rel-17 Mid-Tier / Sensor (1T2R / 20-23 dBm / 64QAM)</option>
+                </optgroup>
+                <optgroup label="4G LTE & Cellular IoT (3GPP Rel-8 to Rel-15)">
+                  <option value="LTE_CAT18_GIGA">4G LTE-A Pro Cat 18/20 Gigabit Smartphone (4x4 DL / 2Tx UL)</option>
+                  <option value="LTE_CAT16_GIGA">4G LTE-A Cat 16 Gigabit Terminal (4x4 DL / 2Tx UL)</option>
+                  <option value="LTE_CAT4_STD">4G LTE Cat 4 Standard Legacy Handset (2x2 DL / 1Tx UL)</option>
+                  <option value="LTE_CATM1_IOT">Cellular IoT Cat-M1 / NB-IoT M2M (1T1R / 23 dBm / Narrowband)</option>
+                </optgroup>
               </select>
             </div>
 
-            {/* UE MIMO Mode (1T2R, 1T4R, 2T2R, 2T4R, 4T4R) */}
+            {/* UE MIMO Mode (1T1R, 1T2R, 1T4R, 2T2R, 2T4R, 4T4R, 4T8R) */}
             <div>
-              <label className="block text-xs font-mono uppercase tracking-wider text-slate-400 mb-1.5">
-                UE MIMO Mode (Tx/Rx Antennas)
+              <label className="block text-xs font-mono uppercase tracking-wider text-slate-400 mb-1.5 flex items-center justify-between">
+                <span>UE MIMO Mode (Tx/Rx Antennas)</span>
+                <span className="text-[10px] text-emerald-400 font-normal">TS 38.211 / 38.214</span>
               </label>
               <select
-                value={inputs.ueMimoMode || '2T4R'}
+                value={inputs.ueMimoMode || (inputs.technology === '4G' ? '1T2R' : '2T4R')}
                 onChange={(e) => update({ ueMimoMode: e.target.value as UeMimoMode })}
                 className="w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-100 font-mono focus:border-cyan-400 focus:outline-none"
               >
+                <option value="1T1R">1Tx 1Rx (Rank 1 UL SISO / 1-Layer DL - RedCap/IoT Baseline)</option>
                 <option value="1T2R">1Tx 2Rx (Rank 1 UL SISO / 2-Layer DL)</option>
-                <option value="1T4R">1Tx 4Rx (Rank 1 UL SISO / 4-Layer DL + 2.5dB Div)</option>
+                <option value="1T4R">1Tx 4Rx (Rank 1 UL SISO / 4-Layer DL + 2.5dB Div Gain)</option>
                 <option value="2T2R">2Tx 2Rx (Rank 2 UL MIMO [2x UL Thrpt] / 2-Layer DL)</option>
-                <option value="2T4R">2Tx 4Rx (Rank 2 UL MIMO [2x UL Thrpt] / 4-Layer DL + 2.5dB Div)</option>
-                <option value="4T4R">4Tx 4Rx (Rank 4 UL MIMO [4x UL Thrpt] / 4-Layer DL + 2.5dB Div)</option>
+                <option value="2T4R">2Tx 4Rx (Rank 2 UL MIMO [2x UL Thrpt] / 4-Layer DL + 2.5dB Div Gain)</option>
+                <option value="4T4R">4Tx 4Rx (Rank 4 UL MIMO [4x UL Thrpt] / 4-Layer DL + 2.5dB Div Gain)</option>
+                <option value="4T8R">4Tx 8Rx (Rank 4 UL MIMO [4x UL Thrpt] / 8-Layer DL Array + 4.5dB Div Gain)</option>
               </select>
             </div>
 
             {/* UE Terminal Form Factor */}
             <div>
-              <label className="block text-xs font-mono uppercase tracking-wider text-slate-400 mb-1.5">
-                UE Terminal Form Factor
+              <label className="block text-xs font-mono uppercase tracking-wider text-slate-400 mb-1.5 flex items-center justify-between">
+                <span>UE Terminal Form Factor</span>
+                <span className="text-[10px] text-amber-400 font-normal">TS 38.101-1 / 2</span>
               </label>
               <select
                 value={inputs.ueType}
                 onChange={(e) => handleUeTypeChange(e.target.value as UeType)}
                 className="w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-100 font-mono focus:border-cyan-400 focus:outline-none"
               >
-                <option value="HANDSET_STD">Standard Handset (Power Class 3 - 23 dBm)</option>
-                <option value="HANDSET_HPUE">High-Power UE (HPUE Class 2 - 26 dBm)</option>
-                <option value="INDOOR_CPE">Indoor FWA CPE (26 dBm, 4 dBi Gain)</option>
-                <option value="OUTDOOR_CPE">Outdoor Rooftop CPE (27-30 dBm, 9 dBi Gain)</option>
+                <option value="HANDSET_STD">Standard Mobile Handset (Power Class 3 - 23 dBm)</option>
+                <option value="HANDSET_HPUE">High-Power Mobile UE (HPUE Power Class 2 - 26 dBm / 400 mW)</option>
+                <option value="INDOOR_CPE">Indoor FWA Desktop CPE Gateway (26 dBm / 4 dBi Gain)</option>
+                <option value="OUTDOOR_CPE">Outdoor High-Gain Rooftop CPE (27-30 dBm / 9-12 dBi Gain)</option>
+                <option value="INDUSTRIAL_IOT">Industrial 5G Rugged Gateway / Private URLLC (26 dBm / 5 dBi)</option>
+                <option value="VEHICULAR_CPE">Vehicular / First Responder Roof Terminal (26-28 dBm / 4 dBi)</option>
+                <option value="MMWAVE_CPE">5G mmWave Fixed Wireless Terminal (33-43 dBm EIRP / 18 dBi)</option>
+                <option value="REDCAP_DEVICE">5G RedCap Wearable / Industrial Sensor (Power Class 3/4 - 20-23 dBm)</option>
               </select>
             </div>
           </div>
 
-          {/* UE MIMO Uplink Impact Banner */}
-          <div className="bg-slate-950/70 border border-slate-800 rounded-md p-3 text-xs font-mono">
-            <div className="flex flex-wrap items-center justify-between gap-2">
+          {/* UE 3GPP Specification & Physical Architecture Status Strip */}
+          <div className="bg-slate-950/80 border border-slate-800 rounded-lg p-3 text-xs font-mono space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800/80">
               <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                <span className="text-slate-300 font-semibold">
-                  Uplink Spatial Architecture: <span className="text-emerald-400 font-bold">{inputs.ueMimoMode?.startsWith('4T') ? '4Tx (Quad Streams - Rank 4)' : inputs.ueMimoMode?.startsWith('2T') ? '2Tx (Dual Streams - Rank 2)' : '1Tx (Single Stream - Rank 1)'}</span>
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-emerald-400/20" />
+                <span className="text-slate-200 font-semibold">
+                  Uplink Spatial Architecture: <span className="text-emerald-400 font-bold">{inputs.ueMimoMode?.startsWith('4T') ? '4Tx (Quad Streams - Rank 4 SU-MIMO)' : inputs.ueMimoMode?.startsWith('2T') ? '2Tx (Dual Streams - Rank 2 SU-MIMO)' : '1Tx (Single Stream - Rank 1 SISO)'}</span>
                 </span>
               </div>
               <span className="text-cyan-400 font-semibold">
                 {inputs.ueMimoMode?.startsWith('4T') ? '⚡ +300% Peak UL Speed Potential (4x UL MIMO)' : inputs.ueMimoMode?.startsWith('2T') ? '⚡ +100% Peak UL Speed Potential (2x UL MIMO)' : 'Standard Single-Stream Uplink (Capped)'}
               </span>
             </div>
-            <div className="mt-1 text-[11px] text-slate-400">
-              Downlink Diversity: {inputs.ueMimoMode?.endsWith('4R') ? '4Rx Antennas active (Up to 4 DL layers supported + 2.5 dB MMSE-IRC Diversity Gain)' : '2Rx Antennas active (Up to 2 DL layers supported)'}
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+              <div className="bg-slate-900/80 p-2 rounded border border-slate-800/60">
+                <span className="text-slate-500 block text-[10px] uppercase">3GPP Power Class</span>
+                <span className="text-amber-300 font-bold">
+                  {inputs.ueTxPowerDbm >= 30 ? 'Class 1 (30-33 dBm)' : inputs.ueTxPowerDbm >= 28 ? 'Class 1.5 (28-29 dBm)' : inputs.ueTxPowerDbm >= 25 ? 'Class 2 HPUE (26 dBm)' : inputs.ueTxPowerDbm >= 22 ? 'Class 3 (23 dBm Std)' : inputs.ueTxPowerDbm >= 19 ? 'Class 4 (20 dBm RedCap)' : 'Class 5 (14 dBm Low)'}
+                </span>
+              </div>
+
+              <div className="bg-slate-900/80 p-2 rounded border border-slate-800/60">
+                <span className="text-slate-500 block text-[10px] uppercase">DL Diversity Gain</span>
+                <span className="text-cyan-300 font-bold">
+                  {inputs.ueMimoMode?.endsWith('8R') ? '+4.5 dB (8Rx MMSE-IRC)' : inputs.ueMimoMode?.endsWith('4R') ? '+2.5 dB (4Rx MMSE-IRC)' : inputs.ueMimoMode?.endsWith('1R') ? '-2.5 dB (1Rx SISO)' : '0.0 dB (2Rx Baseline)'}
+                </span>
+              </div>
+
+              <div className="bg-slate-900/80 p-2 rounded border border-slate-800/60">
+                <span className="text-slate-500 block text-[10px] uppercase">SRS Switching</span>
+                <span className="text-slate-200 font-bold">
+                  {inputs.ueMimoMode?.endsWith('4R') || inputs.ueMimoMode?.endsWith('8R') ? '1T4R / 2T4R Supported' : '1T2R / 2T2R Supported'}
+                </span>
+              </div>
+
+              <div className="bg-slate-900/80 p-2 rounded border border-slate-800/60">
+                <span className="text-slate-500 block text-[10px] uppercase">UL Full Power Mode</span>
+                <span className="text-emerald-300 font-bold">
+                  {inputs.ueMimoMode?.startsWith('1T') ? 'Mode 1 (Single Port)' : 'Mode 2 (Balanced PAs)'}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -2419,7 +2848,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
             <div>
               <div className="flex justify-between items-center mb-1.5">
                 <label className="text-xs font-mono uppercase tracking-wider text-slate-400">
-                  UE Max TX Power
+                  UE Max TX Power (P_max)
                 </label>
                 <span className="text-xs font-mono font-semibold text-emerald-400">
                   {inputs.ueTxPowerDbm} dBm ({Math.round(Math.pow(10, (inputs.ueTxPowerDbm - 30) / 10) * 1000)} mW)
@@ -2427,18 +2856,20 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
               </div>
               <input
                 type="range"
-                min="18"
-                max="30"
+                min="14"
+                max="33"
                 step="0.5"
                 value={inputs.ueTxPowerDbm}
                 onChange={(e) => update({ ueTxPowerDbm: Number(e.target.value) })}
                 className="w-full accent-cyan-400 cursor-pointer"
               />
               <div className="flex justify-between text-[10px] text-slate-500 font-mono mt-1">
-                <span>20 dBm (Class 4)</span>
-                <span>23 dBm (Class 3 std)</span>
+                <span>14 dBm (Cl.5)</span>
+                <span>20 dBm (Cl.4)</span>
+                <span>23 dBm (Cl.3 std)</span>
                 <span>26 dBm (HPUE)</span>
-                <span>27-30 dBm (CPE)</span>
+                <span>29 dBm (Cl.1.5)</span>
+                <span>33 dBm (Cl.1)</span>
               </div>
             </div>
 
@@ -2446,7 +2877,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
             <div>
               <div className="flex justify-between items-center mb-1.5">
                 <label className="text-xs font-mono uppercase tracking-wider text-slate-400">
-                  UE Antenna Gain
+                  UE Antenna Gain (G_ue)
                 </label>
                 <span className="text-xs font-mono font-semibold text-slate-200">
                   {inputs.ueAntennaGainDbi} dBi
@@ -2455,7 +2886,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
               <input
                 type="range"
                 min="0"
-                max="12"
+                max="24"
                 step="0.5"
                 value={inputs.ueAntennaGainDbi}
                 onChange={(e) => update({ ueAntennaGainDbi: Number(e.target.value) })}
@@ -2464,7 +2895,8 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
               <div className="flex justify-between text-[10px] text-slate-500 font-mono mt-1">
                 <span>0 dBi (Phone)</span>
                 <span>4 dBi (Indoor CPE)</span>
-                <span>9-12 dBi (Outdoor High Gain)</span>
+                <span>11 dBi (Outdoor High Gain)</span>
+                <span>18-24 dBi (mmWave Array)</span>
               </div>
             </div>
 
@@ -2481,7 +2913,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
               <input
                 type="range"
                 min="1"
-                max="15"
+                max="25"
                 step="0.5"
                 value={inputs.ueHeightMeters}
                 onChange={(e) => update({ ueHeightMeters: Number(e.target.value) })}
@@ -2489,8 +2921,9 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
               />
               <div className="flex justify-between text-[10px] text-slate-500 font-mono mt-1">
                 <span>1.5m (Handset)</span>
-                <span>5m (2nd Floor)</span>
-                <span>10m+ (Rooftop CPE)</span>
+                <span>2m (Indoor CPE)</span>
+                <span>8m (Rooftop CPE)</span>
+                <span>15-25m (Tower/Mast)</span>
               </div>
             </div>
           </div>
@@ -2517,6 +2950,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
               />
               <div className="flex justify-between text-[10px] text-slate-500 font-mono mt-1">
                 <span>0.0 dB (CPE / Free space)</span>
+                <span>2.0 dB (Wearable)</span>
                 <span>3.0 dB (Handset standard)</span>
                 <span>5.0 dB (Heavy absorption)</span>
               </div>
@@ -2535,7 +2969,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
               <input
                 type="range"
                 min="2"
-                max="12"
+                max="14"
                 step="0.5"
                 value={inputs.dlNoiseFigureDb ?? inputs.ueNoiseFigureDb ?? 7}
                 onChange={(e) => {
@@ -2545,29 +2979,30 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                 className="w-full accent-cyan-400 cursor-pointer"
               />
               <div className="flex justify-between text-[10px] text-slate-500 font-mono mt-1">
-                <span>5.0 dB (CPE)</span>
-                <span>7.0 dB (3GPP Default)</span>
-                <span>9.0 dB (Budget UE)</span>
+                <span>5.0 dB (High-Tier CPE)</span>
+                <span>7.0-7.5 dB (3GPP Default)</span>
+                <span>8.5-9 dB (RedCap/Budget)</span>
+                <span>10-12 dB (mmWave)</span>
               </div>
             </div>
 
             {/* Uplink Transmission Scheme Summary */}
             <div className="bg-slate-950/60 border border-slate-800 rounded-md p-2.5 text-xs font-mono flex flex-col justify-between">
               <div>
-                <div className="text-slate-400 mb-1">UL SU-MIMO Codebook Status:</div>
+                <div className="text-slate-400 mb-1">UL Transmission & Standards:</div>
                 <div className="text-slate-200 font-semibold">
-                  {inputs.ueMimoMode?.startsWith('4T') ? '4Tx Codebook / Non-Codebook' : inputs.ueMimoMode?.startsWith('2T') ? '2Tx Codebook / Non-Codebook' : '1Tx Single Port Port-0'}
+                  {inputs.ueMimoMode?.startsWith('4T') ? '4Tx Codebook / Non-Codebook Multiplexing' : inputs.ueMimoMode?.startsWith('2T') ? '2Tx Codebook / Non-Codebook Multiplexing' : '1Tx Single Port Port-0 SISO'}
                 </div>
               </div>
               <div className="text-[10px] text-slate-500 mt-1">
-                TS 38.214 §6.1.1 · Sounding Reference Signal (SRS) 1T2R/1T4R/2T4R switching supported.
+                3GPP TS 38.214 §6.1.1 · TS 38.101-1 Table 6.2.1-1 · TS 38.306 UE Capability Engineering.
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* SECTION 4: SPM PROPAGATION & ENVIRONMENT */}
+      {/* SECTION 5: SPM PROPAGATION & ENVIRONMENT */}
       {activeSection === 'spm' && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -3095,7 +3530,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
         </div>
       )}
 
-      {/* SECTION 5: CARRIER AGGREGATION (CA) */}
+      {/* SECTION 7: CARRIER AGGREGATION (CA) */}
       {activeSection === 'ca' && (
         <div className="space-y-4">
           <div className="flex items-center justify-between p-3 bg-slate-950/80 border border-slate-800 rounded-md">

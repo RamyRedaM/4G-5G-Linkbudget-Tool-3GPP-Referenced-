@@ -175,8 +175,18 @@ const UE_MIMO_SPECS: Record<UeMimoMode, {
   ulThrptMultiplier: string;
   description: string;
 }> = {
+  '1T1R': {
+    name: '1Tx 1Rx (SISO Single Antenna / RedCap / IoT)',
+    txAntennas: 1,
+    rxAntennas: 1,
+    ulRank: 1,
+    dlRank: 1,
+    diversityGainDb: -2.5,
+    ulThrptMultiplier: '0.5x (Single Stream)',
+    description: '3GPP Rel-17 RedCap, Cat-M1, or low-power IoT sensor baseline. Single antenna with -2.5 dB diversity penalty relative to 2Rx.'
+  },
   '1T2R': {
-    name: '1Tx 2Rx (SISO Uplink / Dual Rx)',
+    name: '1Tx 2Rx (SISO Uplink / Dual Rx Diversity)',
     txAntennas: 1,
     rxAntennas: 2,
     ulRank: 1,
@@ -224,10 +234,29 @@ const UE_MIMO_SPECS: Record<UeMimoMode, {
     diversityGainDb: 2.5,
     ulThrptMultiplier: '4.0x (300% Boost)',
     description: 'High-performance Fixed Wireless Access (FWA) CPE or high-end industrial router. 4Tx antennas enable 4-layer UL SU-MIMO (quadrupling peak UL data rates).'
+  },
+  '4T8R': {
+    name: '4Tx 8Rx (5G-Advanced Rel-18 Macro FWA / Array)',
+    txAntennas: 4,
+    rxAntennas: 8,
+    ulRank: 4,
+    dlRank: 8,
+    diversityGainDb: 4.5,
+    ulThrptMultiplier: '4.0x (+4.5 dB Rx Gain)',
+    description: 'Rel-18 5G-Advanced high-tier outdoor FWA terminal with 8-antenna beamformed reception array and quad-Tx uplink spatial multiplexing.'
   }
 };
 
 const UE_CATEGORIES: { id: UeCategory; label: string; tier: string; defaultUeMimo: UeMimoMode; defaultType: UeType; pwrDbm: number; desc: string }[] = [
+  {
+    id: 'REL18_ADVANCED',
+    label: '5G-Advanced Rel-18 Ultra Flagship',
+    tier: 'Tier 1+ Advanced',
+    defaultUeMimo: '4T4R',
+    defaultType: 'HANDSET_STD',
+    pwrDbm: 23,
+    desc: '4x4 DL/UL MIMO, 1024QAM Ready, AI Beamforming, Rel-18 5G-Advanced'
+  },
   {
     id: 'REL16_FLAGSHIP',
     label: '5G NR Rel-16/17 Flagship Smartphone',
@@ -253,20 +282,65 @@ const UE_CATEGORIES: { id: UeCategory; label: string; tier: string; defaultUeMim
     defaultUeMimo: '2T4R',
     defaultType: 'HANDSET_HPUE',
     pwrDbm: 26,
-    desc: '26 dBm (+3 dB Tx power) compensates TDD UL coverage loss'
+    desc: '26 dBm (+3 dB Tx power) compensates TDD UL coverage loss (n41/n77/n78/B14)'
   },
   {
     id: 'FWA_CPE_PRO',
-    label: '5G FWA High-Gain Outdoor CPE (Cat-Pro)',
+    label: '5G FWA High-Gain Outdoor Rooftop CPE (Cat-Pro)',
     tier: 'Fixed Wireless',
     defaultUeMimo: '4T4R',
     defaultType: 'OUTDOOR_CPE',
-    pwrDbm: 27,
-    desc: '4T4R Quad-Tx Uplink MIMO, 9 dBi High Gain, 0 dB Body Loss'
+    pwrDbm: 29,
+    desc: '4T4R Quad-Tx Uplink MIMO, 12 dBi Directional Gain, 0 dB Body Loss'
+  },
+  {
+    id: 'FWA_CPE_INDOOR',
+    label: '5G FWA Indoor Desktop CPE / Gateway',
+    tier: 'Indoor FWA',
+    defaultUeMimo: '2T4R',
+    defaultType: 'INDOOR_CPE',
+    pwrDbm: 26,
+    desc: '2T4R Dual-Tx UL MIMO, 4 dBi Internal Antennas, Power Class 2'
+  },
+  {
+    id: 'INDUSTRY_4_0',
+    label: '5G Industrial Rugged Terminal / Private 5G URLLC',
+    tier: 'Industrial IoT',
+    defaultUeMimo: '2T4R',
+    defaultType: 'INDUSTRIAL_IOT',
+    pwrDbm: 26,
+    desc: 'Rel-16 URLLC, 26 dBm HPUE, 5 dBi External Omnis, Ultra-low Latency'
+  },
+  {
+    id: 'MMWAVE_PREMIUM',
+    label: '5G mmWave High-Capacity Fixed Terminal (FR2 PC1)',
+    tier: 'mmWave FWA',
+    defaultUeMimo: '4T4R',
+    defaultType: 'MMWAVE_CPE',
+    pwrDbm: 33,
+    desc: 'FR2 Power Class 1, 18 dBi Phased Array, Multi-Gigabit Peak'
+  },
+  {
+    id: 'REDCAP_REL17',
+    label: '5G RedCap Rel-17 Mid-Tier / Wearable Terminal',
+    tier: 'Reduced Cap',
+    defaultUeMimo: '1T2R',
+    defaultType: 'REDCAP_DEVICE',
+    pwrDbm: 23,
+    desc: '3GPP Rel-17 RedCap, 1Tx 2Rx (or 1Tx 1Rx), 64QAM, Extended Battery'
+  },
+  {
+    id: 'LTE_CAT18_GIGA',
+    label: '4G LTE-A Pro Cat 18/20 Gigabit Smartphone',
+    tier: 'Flagship 4G',
+    defaultUeMimo: '2T4R',
+    defaultType: 'HANDSET_STD',
+    pwrDbm: 23,
+    desc: '5CC CA, 4x4 DL Spatial Multiplexing, 2Tx UL MIMO, 256QAM DL'
   },
   {
     id: 'LTE_CAT16_GIGA',
-    label: '4G LTE-A Cat 16/18 Gigabit Terminal',
+    label: '4G LTE-A Cat 16 Gigabit Terminal',
     tier: 'Advanced 4G',
     defaultUeMimo: '2T4R',
     defaultType: 'HANDSET_STD',
@@ -275,12 +349,21 @@ const UE_CATEGORIES: { id: UeCategory; label: string; tier: string; defaultUeMim
   },
   {
     id: 'LTE_CAT4_STD',
-    label: '4G LTE Cat 4 Standard / IoT Terminal',
+    label: '4G LTE Cat 4 Standard Legacy Handset',
     tier: 'Legacy / Budget',
     defaultUeMimo: '1T2R',
     defaultType: 'HANDSET_STD',
     pwrDbm: 23,
     desc: '2x2 DL MIMO, 1Tx UL (150 Mbps DL / 50 Mbps UL peak)'
+  },
+  {
+    id: 'LTE_CATM1_IOT',
+    label: 'Cellular IoT Cat-M1 / NB-IoT M2M Sensor',
+    tier: 'Massive IoT',
+    defaultUeMimo: '1T1R',
+    defaultType: 'REDCAP_DEVICE',
+    pwrDbm: 23,
+    desc: '1.4 MHz / 200 kHz Narrowband, 1Tx 1Rx SISO, Ultra-Deep Penetration'
   }
 ];
 
@@ -815,7 +898,7 @@ export const MimoTradeoffAnalysis: React.FC<MimoTradeoffAnalysisProps> = ({
             <div className="text-xs font-mono uppercase tracking-wider text-slate-400 mb-2.5">
               Select User Equipment (UE) MIMO Architecture:
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2.5">
               {(Object.keys(UE_MIMO_SPECS) as UeMimoMode[]).map((mode) => {
                 const spec = UE_MIMO_SPECS[mode];
                 const isSelected = inputs.ueMimoMode === mode;
