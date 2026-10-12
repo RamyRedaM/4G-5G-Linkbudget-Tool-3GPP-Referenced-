@@ -264,6 +264,30 @@ export const TelecomGuruGuide: React.FC<TelecomGuruGuideProps> = ({ isOpen, onCl
               </div>
             </div>
           </div>
+
+          {/* Section 10: 3GPP Monte Carlo Stochastic Radio Simulation */}
+          <div className="bg-slate-950/70 border border-slate-800 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-cyan-300 font-mono mb-2">
+              10. 3GPP Monte Carlo Stochastic Radio Simulation Engine (TS 38.901 / ITU-R M.2412)
+            </h3>
+            <p className="text-slate-300 mb-2">
+              While deterministic link budgets calculate coverage for nominal radio points, real-world cellular environments exhibit spatial variations and random shadowing. The Monte Carlo Analysis Module executes 500 to 5,000 statistical trials:
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+              <div className="bg-slate-900 p-2.5 rounded border border-slate-800">
+                <span className="text-cyan-300 font-mono font-semibold block mb-1">Lognormal Shadowing &amp; Indoor Loss:</span>
+                <span className="text-slate-400">
+                  Generates zero-mean Gaussian shadow fading S ~ N(0, σ_SF²) with user-defined standard deviation (e.g. 6 to 12 dB) and stochastic building penetration loss for indoor UEs.
+                </span>
+              </div>
+              <div className="bg-slate-900 p-2.5 rounded border border-slate-800">
+                <span className="text-emerald-300 font-mono font-semibold block mb-1">CDF &amp; 3GPP Percentiles (P10 / P50 / P90):</span>
+                <span className="text-slate-400">
+                  Evaluates 10th-percentile (P10 Cell-Edge Throughput), 50th-percentile (Median), and 90th-percentile (Peak Near) rates, mapping empirical coverage probability against target reliability.
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Footer */}
