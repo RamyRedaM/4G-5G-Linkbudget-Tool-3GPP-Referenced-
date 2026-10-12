@@ -6,15 +6,32 @@
 export type TechnologyType = '4G' | '5G_SA' | '5G_NSA';
 export type DuplexMode = 'FDD' | 'TDD';
 export type MimoMode = 'SISO' | '2x2' | '4x4' | '8x8' | '16TR' | '32TR' | '64TR';
-export type UeType = 'HANDSET_STD' | 'HANDSET_HPUE' | 'INDOOR_CPE' | 'OUTDOOR_CPE';
-export type UeMimoMode = '1T2R' | '1T4R' | '2T2R' | '2T4R' | '4T4R';
+export type UeType = 
+  | 'HANDSET_STD' 
+  | 'HANDSET_HPUE' 
+  | 'INDOOR_CPE' 
+  | 'OUTDOOR_CPE'
+  | 'INDUSTRIAL_IOT'
+  | 'VEHICULAR_CPE'
+  | 'MMWAVE_CPE'
+  | 'REDCAP_DEVICE';
+
+export type UeMimoMode = '1T1R' | '1T2R' | '1T4R' | '2T2R' | '2T4R' | '4T4R' | '4T8R';
+
 export type UeCategory = 
-  | 'REL16_FLAGSHIP' // 5G NR Rel-16/17 Cat 20+ (4x4 DL / 2Tx-4Tx UL)
-  | 'REL15_STANDARD' // 5G NR Rel-15 Cat 18 (4x4 DL / 1Tx-2Tx UL)
-  | 'LTE_CAT16_GIGA' // 4G LTE Cat 16+ Gigabit LTE (4x4 DL / 2x2 UL)
-  | 'LTE_CAT4_STD'   // 4G LTE Cat 4 Legacy (2x2 DL / 1Tx UL)
-  | 'HPUE_CLASS2'    // High-Power UE Power Class 2 (26 dBm)
-  | 'FWA_CPE_PRO';   // 5G High-Tier Fixed Wireless Access (4T4R)
+  | 'REL18_ADVANCED'  // 5G-Advanced Rel-18 Ultra Flagship (4x4 DL / 2Tx-4Tx UL / 1024QAM / AI Beamforming)
+  | 'REL16_FLAGSHIP'  // 5G NR Rel-16/17 Flagship Smartphone (4x4 DL / 2Tx UL / 256QAM)
+  | 'REL15_STANDARD'  // 5G NR Rel-15 Standard Smartphone (4x4 DL / 1Tx UL / 256QAM)
+  | 'HPUE_CLASS2'     // 5G High-Power UE Power Class 2 (26 dBm / 2Tx UL MIMO)
+  | 'FWA_CPE_PRO'     // 5G FWA High-Gain Outdoor Rooftop CPE (4T4R / 27-30 dBm / 9-12 dBi)
+  | 'FWA_CPE_INDOOR'  // 5G FWA Indoor Desktop CPE (2T4R / 26 dBm / 4 dBi)
+  | 'INDUSTRY_4_0'    // 5G Industrial Rugged Terminal / Private 5G URLLC (2T4R / 26 dBm / 5 dBi)
+  | 'MMWAVE_PREMIUM'  // 5G mmWave High-Capacity Fixed Terminal (FR2 Power Class 1 / 4x4 / 18 dBi)
+  | 'REDCAP_REL17'    // 5G RedCap Rel-17 Mid-Tier Device (1T2R / 20-23 dBm / 64QAM)
+  | 'LTE_CAT18_GIGA'  // 4G LTE-A Pro Cat 18/20 Gigabit (4x4 DL / 2Tx UL / 256QAM)
+  | 'LTE_CAT16_GIGA'  // 4G LTE-A Cat 16+ Gigabit LTE (4x4 DL / 2Tx UL)
+  | 'LTE_CAT4_STD'    // 4G LTE Cat 4 Legacy (2x2 DL / 1Tx UL - 150/50 Mbps)
+  | 'LTE_CATM1_IOT';  // Cellular IoT Cat-M1 / NB-IoT (1T1R / 23 dBm / 1.4 MHz)
 export type EnvironmentClutter = 'DENSE_URBAN' | 'URBAN' | 'SUBURBAN' | 'RURAL';
 export type IndoorOutdoorScenario = 'OUTDOOR_LOS' | 'OUTDOOR_NLOS' | 'IN_VEHICLE' | 'INDOOR_STANDARD' | 'INDOOR_DEEP';
 export type PropagationModelType = 'SPM' | '3GPP_UMA' | '3GPP_UMI' | '3GPP_RMA' | 'COST231_HATA' | 'FSPL';
@@ -240,9 +257,9 @@ export interface LinkBudgetCalculationResult {
     carrierCount: number;
   };
 
-  // Systems Overhead (3GPP Rel-15/16/17)
-  avgPdcchOverheadPercent: number; // Average PDCCH overhead (%): calculated based on all inputs (< 10%)
-  avgPucchOverheadPercent: number; // Average PUCCH overhead (%): calculated based on all inputs (< 20%)
+  // Systems Overhead (3GPP Rel-15/16/17/18 Control Channel Engineering)
+  avgPdcchOverheadPercent: number; // Average PDCCH overhead (%): dynamic function of 3GPP parameters (can exceed 10%)
+  avgPucchOverheadPercent: number; // Average PUCCH overhead (%): dynamic function of 3GPP parameters (can exceed 20%)
 
   // Receiver Sensitivity 3GPP Breakdown (DL at UE side & UL at eNB/gNB side)
   rxSensitivityBreakdown: {

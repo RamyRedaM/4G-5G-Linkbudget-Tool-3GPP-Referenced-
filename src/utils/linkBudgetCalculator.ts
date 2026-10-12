@@ -10,7 +10,8 @@ import {
   VoNrCodec,
   VoLteCodec,
   RedCapProfile,
-  McxProfile
+  McxProfile,
+  UeMimoMode
 } from '../types/telecom';
 import { TELECOM_BANDS, MIMO_CONFIGS, TDD_FRAME_PATTERNS } from '../data/telecomBands';
 import {
@@ -25,8 +26,8 @@ import {
  */
 
 export interface ControlOverheadsResult {
-  avgPdcchOverheadPercent: number; // strictly < 10%
-  avgPucchOverheadPercent: number; // strictly < 20%
+  avgPdcchOverheadPercent: number; // Dynamic function of 3GPP parameters (can vary & exceed 10%)
+  avgPucchOverheadPercent: number; // Dynamic function of 3GPP parameters (can vary & exceed 20%)
   pdcchBreakdown: {
     basePercent: number;
     bwFactorPercent: number;
@@ -41,12 +42,16 @@ export interface ControlOverheadsResult {
     csiPeriodicityPercent: number;
     caFactorPercent: number;
     tddFactorPercent: number;
+    bwFactorPercent: number;
   };
 }
 
 /**
- * Calculates dynamically average PDCCH (< 10%) and PUCCH (< 20%) overheads
- * based on all RF channel, beam, CA, CSI-RS, and duplexing parameters.
+ * Calculates dynamically average PDCCH and PUCCH overheads based on
+ * 3GPP defined parameters: channel bandwidth, active beams, carrier aggregation,
+ * CSI-RS reporting density, DMRS numerology, residual BLER, and TDD frame ratio.
+ * No artificial capping: can freely exceed 10% (PDCCH) or 20% (PUCCH) to reflect
+ * authentic reduction in PDSCH and PUSCH traffic shares.
  */
 export function calculateControlOverheads(inputs: LinkBudgetInputs): ControlOverheadsResult {
   const is4G = inputs.technology === '4G';
@@ -57,61 +62,72 @@ export function calculateControlOverheads(inputs: LinkBudgetInputs): ControlOver
   const caCarriers = inputs.caEnabled ? (inputs.caCarriersCount || 1) : 1;
   const bwMHz = inputs.bandwidthMHz;
 
-  // 1. Average PDCCH Overhead (%) - 3GPP TS 38.211 / TS 38.213 / TS 36.211 (LTE 1-3 OFDM symbols)
-  // Narrow bandwidths have higher relative PRB reservation for CORESET / PCFICH / PDCCH
-  const bwFactor = bwMHz <= 10 ? 1.6 : bwMHz <= 20 ? 0.9 : bwMHz <= 50 ? 0.0 : -0.7;
-  // Multi-beam sweeping increases PDCCH search spaces (5G only, 0 for 4G)
-  const beamFactor = is4G ? 0.0 : (numBeams - 1) * 0.28;
-  // Carrier aggregation cross-carrier / multi-carrier DCI scheduling overhead
-  const caFactor = (caCarriers - 1) * 0.45;
-  // CSI-RS triggering occasions on PDCCH (5G only, 0 for 4G)
-  const csiFactor = is4G ? 0.0 : (csiReports - 1) * 0.25;
-  // DMRS slot structure adjustment (5G only, 0 for 4G)
-  const dmrsFactor = is4G ? 0.0 : (dmrsSymbols - 1) * 0.20;
+  // 1. Average PDCCH Overhead (%) - 3GPP TS 38.211 / TS 38.213 / TS 36.211
+  // In narrow bandwidths or high multi-carrier / multi-beam, PDCCH CORESET PRB ratio scales up
+  const bwFactor = bwMHz <= 1.4 ? 12.0 : bwMHz <= 3 ? 7.5 : bwMHz <= 5 ? 4.5 : bwMHz <= 10 ? 2.5 : bwMHz <= 20 ? 1.0 : bwMHz <= 50 ? 0.0 : -0.8;
+  // Multi-beam sweeping increases PDCCH search space monitoring occasions (TS 38.213 §10)
+  const beamFactor = is4G ? 0.0 : (numBeams - 1) * 0.45;
+  // Carrier aggregation cross-carrier & multi-carrier DCI scheduling overhead
+  const caFactor = (caCarriers - 1) * 0.85;
+  // CSI-RS triggering occasions on PDCCH
+  const csiFactor = is4G ? 0.0 : (csiReports - 1) * 0.40;
+  // DMRS additional symbols per slot
+  const dmrsFactor = is4G ? 0.0 : (dmrsSymbols - 1) * 0.50;
+  // Residual BLER retransmission scheduling DCI demands
+  const blerPdcchFactor = Math.max(0, ((inputs.residualBlerTargetPercent ?? 10) - 10) * 0.12);
 
-  const rawPdcch = 4.2 + bwFactor + beamFactor + caFactor + csiFactor + dmrsFactor;
-  // Strictly clamp within range < 10% (3GPP standard range typically 2.5% to 9.5%)
-  const clampedPdcch = Math.min(9.5, Math.max(2.5, rawPdcch));
-  const avgPdcchOverheadPercent = Number(clampedPdcch.toFixed(2));
+  const rawPdcch = 4.8 + bwFactor + beamFactor + caFactor + csiFactor + dmrsFactor + blerPdcchFactor;
+  // Uncapped: only bounded by physical baseline (> 1.8%)
+  const avgPdcchOverheadPercent = Number(Math.max(1.8, rawPdcch).toFixed(2));
 
-  // 2. Average PUCCH Overhead (%) - 3GPP TS 38.211 / TS 38.213 / TS 38.214
-  // 2. Average PUCCH Overhead (%) - 3GPP TS 38.211 / TS 38.213 (5G) vs TS 36.211 / TS 36.213 (4G)
-  // For 4G: PUCCH occupies outer band edges (typically 2 to 4 PRB pairs per slot)
-  const csiReportsPercent = is4G ? 1.2 : csiReports * 1.15;
-  const csiPeriodicityPercent = is4G ? 0.7 : (80 / csiPeriodicity) * 0.70;
+  // 2. Average PUCCH Overhead (%) - 3GPP TS 38.211 / TS 38.213 / TS 38.214 & TS 36.211 / TS 36.213
+  // Narrow bandwidth uplink PUCCH reservation occupies significant fraction of PRBs
+  const bwPucchFactor = bwMHz <= 1.4 ? 18.0 : bwMHz <= 3 ? 12.0 : bwMHz <= 5 ? 7.5 : bwMHz <= 10 ? 4.0 : bwMHz <= 20 ? 1.5 : 0.0;
+  
+  // Periodic & semi-persistent CSI reporting load on PUCCH
+  const csiReportsPercent = is4G ? 1.4 : csiReports * 1.35;
+  const csiPeriodicityPercent = is4G ? 0.9 : (80 / csiPeriodicity) * 0.85;
+  
   // CA multi-carrier HARQ codebook (Type-1 / Type-2 PUCCH format 2/3/4)
-  const caPucchFactor = (caCarriers - 1) * 1.5;
-  // TDD frame ratio impact: fewer UL slots condense all DL HARQ-ACKs into UL slots
+  const caPucchFactor = (caCarriers - 1) * 2.2;
+  
+  // TDD frame ratio impact: fewer UL slots condense all DL HARQ-ACKs into rare UL slots
   let tddPucchFactor = 0.0;
   if (inputs.duplexMode === 'TDD') {
     if (inputs.tddFrameRatio === 'CUSTOM') {
       const dlP = inputs.customTddDlPercent ?? 75;
       const ulP = Math.max(5, inputs.customTddUlPercent ?? (100 - dlP));
-      // Higher DL to UL ratio increases PUCCH feedback load
-      tddPucchFactor = Math.min(3.8, Math.max(0.5, (dlP / ulP) * 0.9));
+      // Higher DL to UL ratio heavily concentrates PUCCH feedback load onto UL slots
+      tddPucchFactor = Math.max(0.5, (dlP / ulP) * 1.35);
     } else if (inputs.tddFrameRatio === 'DDDSU') {
-      tddPucchFactor = 3.2;
+      tddPucchFactor = 4.5;
+    } else if (inputs.tddFrameRatio === '8_2') {
+      tddPucchFactor = 4.8;
+    } else if (inputs.tddFrameRatio === '7_3') {
+      tddPucchFactor = 2.6;
     } else if (inputs.tddFrameRatio === 'DDSUU') {
       tddPucchFactor = 1.8;
+    } else if (inputs.tddFrameRatio === 'DSUUU') {
+      tddPucchFactor = 0.6;
     } else {
-      tddPucchFactor = 1.0;
+      tddPucchFactor = 1.2;
     }
   }
-  // BLER retransmissions demand
-  const blerFactor = ((inputs.residualBlerTargetPercent ?? 10) / 10) * 0.35;
+  
+  // BLER retransmissions and NACK generation
+  const blerPucchFactor = ((inputs.residualBlerTargetPercent ?? 10) / 10) * 0.55;
 
   const rawPucch = is4G
-    ? (bwMHz <= 5 ? 8.5 : bwMHz <= 10 ? 6.8 : bwMHz <= 15 ? 5.6 : 4.8) + (caCarriers - 1) * 1.2 + blerFactor
-    : 3.6 + csiReportsPercent + csiPeriodicityPercent + caPucchFactor + tddPucchFactor + blerFactor;
-  // Strictly clamp within range < 20% (3GPP standard range typically 4.0% to 18.5%)
-  const clampedPucch = Math.min(18.5, Math.max(4.0, rawPucch));
-  const avgPucchOverheadPercent = Number(clampedPucch.toFixed(2));
+    ? 4.5 + bwPucchFactor + (caCarriers - 1) * 1.8 + blerPucchFactor
+    : 3.5 + bwPucchFactor + csiReportsPercent + csiPeriodicityPercent + caPucchFactor + tddPucchFactor + blerPucchFactor;
+  // Uncapped: only bounded by physical baseline (> 2.5%)
+  const avgPucchOverheadPercent = Number(Math.max(2.5, rawPucch).toFixed(2));
 
   return {
     avgPdcchOverheadPercent,
     avgPucchOverheadPercent,
     pdcchBreakdown: {
-      basePercent: 4.2,
+      basePercent: 4.8,
       bwFactorPercent: bwFactor,
       beamFactorPercent: beamFactor,
       caFactorPercent: caFactor,
@@ -119,11 +135,12 @@ export function calculateControlOverheads(inputs: LinkBudgetInputs): ControlOver
       dmrsFactorPercent: dmrsFactor
     },
     pucchBreakdown: {
-      basePercent: 3.6,
+      basePercent: 3.5,
       csiReportsPercent,
       csiPeriodicityPercent,
       caFactorPercent: caPucchFactor,
-      tddFactorPercent: tddPucchFactor
+      tddFactorPercent: tddPucchFactor,
+      bwFactorPercent: bwPucchFactor
     }
   };
 }
@@ -590,10 +607,12 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
   const dlBfGainDb = Number((mimoInfo.dlBfGainDb + multiBeamGainDb).toFixed(1));
   const ulRxGainDb = Number((mimoInfo.ulRxGainDb + (numBeams > 1 ? multiBeamGainDb * 0.7 : 0)).toFixed(1));
 
-  // UE MIMO & Antenna Architecture (1T2R, 1T4R, 2T2R, 2T4R, 4T4R)
-  const ueMimo = inputs.ueMimoMode || '1T2R';
+  // UE MIMO & Antenna Architecture (1T1R, 1T2R, 1T4R, 2T2R, 2T4R, 4T4R, 4T8R)
+  // 3GPP 5G NR baseline for mid-band (n78/n77/n41) supports 2Tx UL MIMO (2T4R, 2 layers); 4G LTE baseline is 1Tx (1T2R)
+  const defaultUeMimo: UeMimoMode = is5G ? '2T4R' : '1T2R';
+  const ueMimo = inputs.ueMimoMode || defaultUeMimo;
   const ueTxAntennas = ueMimo.startsWith('4T') ? 4 : (ueMimo.startsWith('2T') ? 2 : 1);
-  const ueRxAntennas = ueMimo.endsWith('4R') ? 4 : 2;
+  const ueRxAntennas = ueMimo.endsWith('8R') ? 8 : (ueMimo.endsWith('4R') ? 4 : (ueMimo.endsWith('1R') ? 1 : 2));
 
   // Effective DL spatial layers: bounded by BS layers and UE Rx antennas
   const effectiveDlLayers = Math.min(mimoInfo.dlLayers, ueRxAntennas);
@@ -601,8 +620,9 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
   // Effective UL spatial layers: bounded by BS Rx layers and UE Tx antennas
   const effectiveUlLayers = Math.min(mimoInfo.ulLayers, ueTxAntennas);
 
-  // 4Rx Diversity combining gain (MMSE-IRC / MRC) over 2Rx baseline
-  const ueRxDiversityGainDb = ueRxAntennas >= 4 ? 2.5 : 0.0;
+  // Diversity combining gain (MMSE-IRC / MRC) over 2Rx baseline:
+  // 8Rx provides +4.5 dB, 4Rx provides +2.5 dB, 2Rx baseline 0.0 dB, 1Rx (SISO) has -2.5 dB diversity loss
+  const ueRxDiversityGainDb = ueRxAntennas >= 8 ? 4.5 : (ueRxAntennas >= 4 ? 2.5 : (ueRxAntennas === 1 ? -2.5 : 0.0));
 
   // 3. PRB Configuration (3GPP TS 38.101 & TS 36.104)
   const scsKhz = isMmWave ? 120 : (is5G ? 30 : 15);
@@ -857,11 +877,12 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
     const ssbSymbolRatio = (numBeamsOh * 4) / (totalSlotsInBurst * 14);
     const ssbOh = isUplink ? 0 : Math.min(0.06, ssbSymbolRatio);
 
-    // Calculated Control channel overhead: PDCCH for DL (< 10%), PUCCH for UL (< 20%)
+    // Calculated Control channel overhead: PDCCH for DL, PUCCH for UL
+    // Dynamic function of 3GPP parameters that directly reduces PDSCH and PUSCH traffic share
     const ctrlOh = isUplink
       ? (controlOverheads.avgPucchOverheadPercent / 100)
       : (controlOverheads.avgPdcchOverheadPercent / 100);
-    const totalOverhead = Math.min(0.45, dmrsOh + ssbOh + ctrlOh);
+    const totalOverhead = Math.min(0.75, dmrsOh + ssbOh + ctrlOh);
 
     const prbs = Math.floor((bwMHz * 1000) / (12 * scsKhz) * 0.92);
     const symbolsPerSec = 14 * (scsKhz / 15) * 1000;
@@ -1193,7 +1214,7 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
       ulValue: `${controlOverheads.avgPucchOverheadPercent.toFixed(2)}% (PUCCH)`,
       unit: '%',
       category: 'RESULT',
-      description: '3GPP dynamic control channel overhead (PDCCH < 10%, PUCCH < 20%)'
+      description: '3GPP dynamic control channel overhead reducing PDSCH & PUSCH traffic share (uncapped, can exceed 10% / 20%)'
     },
     {
       name: is5G ? 'CSI-RS Reporting & Periodicity' : '4G LTE Reference Signals (CRS)',

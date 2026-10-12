@@ -25,7 +25,7 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center gap-3">
           <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 ring-4 ring-cyan-400/20" />
           <span className="text-sm sm:text-base font-semibold tracking-tight text-white font-mono">
-            4G-5G LKB (3GPP Ref) Ver.1.31.1 <span className="text-cyan-400 font-normal">by RamyREDA</span>
+            4G-5G LKB (3GPP Ref) Ver.1.32.1 <span className="text-cyan-400 font-normal">by RamyREDA</span>
           </span>
         </div>
 

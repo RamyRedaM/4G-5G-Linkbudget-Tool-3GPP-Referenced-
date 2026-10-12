@@ -3,7 +3,7 @@ import { LinkBudgetCalculationResult, LinkBudgetInputs } from '../types/telecom'
 export function exportLinkBudgetCsv(result: LinkBudgetCalculationResult, inputs: LinkBudgetInputs) {
   const lines: string[] = [];
 
-  lines.push('=== 4G-5G LKB (3GPP Ref) Ver.1.31.1 by RamyREDA ===');
+  lines.push('=== 4G-5G LKB (3GPP Ref) Ver.1.32.1 by RamyREDA ===');
   lines.push(`Generated: ${new Date().toISOString()}`);
   lines.push(`Technology: ${inputs.technology}`);
   lines.push(`Band: ${inputs.band} (${inputs.duplexMode})`);
@@ -48,8 +48,8 @@ export function exportLinkBudgetCsv(result: LinkBudgetCalculationResult, inputs:
   lines.push(`UL Allocated Subcarriers: ${result.rxSensitivityBreakdown.ul.receivedSubcarriers} SCs (${result.rxSensitivityBreakdown.ul.allocatedPrbs} PRBs)`);
   lines.push(`UL Required SNR @ Cell Edge: ${result.rxSensitivityBreakdown.ul.requiredSnrDb.toFixed(1)} dB`);
   lines.push(`UL ${inputs.technology === '4G' ? 'eNodeB' : 'gNodeB'} Receiver Sensitivity: ${result.bsRxSensitivityDbm.toFixed(1)} dBm`);
-  lines.push(`Average PDCCH Overhead: ${result.avgPdcchOverheadPercent.toFixed(2)}% (< 10%)`);
-  lines.push(`Average PUCCH Overhead: ${result.avgPucchOverheadPercent.toFixed(2)}% (< 20%)`);
+  lines.push(`Average PDCCH Overhead: ${result.avgPdcchOverheadPercent.toFixed(2)}% (PDSCH Impact: -${result.avgPdcchOverheadPercent.toFixed(2)}%)`);
+  lines.push(`Average PUCCH Overhead: ${result.avgPucchOverheadPercent.toFixed(2)}% (PUSCH Impact: -${result.avgPucchOverheadPercent.toFixed(2)}%)`);
   lines.push(`System MAPL: ${result.systemMaplDb.toFixed(1)} dB (DL MAPL: ${result.dlMaplDb.toFixed(1)} dB, UL MAPL: ${result.ulMaplDb.toFixed(1)} dB)`);
   lines.push(`Bottleneck: ${result.bottleneck} (Delta: ${result.bottleneckDeltaDb.toFixed(1)} dB)`);
   lines.push(`Max Cell Radius: ${result.maxCellRangeKm.toFixed(3)} km (${result.maxCellRangeMeters} meters)`);
