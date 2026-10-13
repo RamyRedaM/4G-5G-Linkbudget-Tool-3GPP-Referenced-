@@ -139,6 +139,8 @@ export interface LinkBudgetInputs {
   customTddUlPercent?: number; // User Defined TDD UL ratio (%) when tddFrameRatio === 'CUSTOM' (e.g. 25%)
   band: string;
   bandwidthMHz: number;
+  subcarrierSpacingKhz?: number; // SCS in kHz (e.g. 15, 30, 60, 120)
+  frequencyMHz?: number; // Center frequency in MHz (auto-derived from band or editable)
   
   // Carrier Aggregation
   caEnabled: boolean;
