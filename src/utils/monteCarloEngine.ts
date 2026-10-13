@@ -429,7 +429,163 @@ export interface MonteCarloProgressCallback {
   (progressPercent: number, currentIteration: number, totalIterations: number): void;
 }
 
+/** Sites per km² on a hexagonal grid: each site covers a hexagon of area (√3 / 2) · ISD². */
+export function sitesPerKm2FromIsd(isdMeters: number): number {
+  const siteAreaKm2 = (Math.sqrt(3) / 2) * Math.pow(isdMeters / 1000, 2);
+  return Number((1 / Math.max(1e-6, siteAreaKm2)).toFixed(2));
+}
+
+/** Area of the simulated 120° sector out to the outer radius of the last bin. */
+function sectorAreaKm2(bins: BinConfig[]): number {
+  const outerKm = Math.max(0.01, ...bins.map(b => b.outerRadiusMeters)) / 1000;
+  return (Math.PI * outerKm * outerKm) / 3;
+}
+
+/**
+ * Bins with radii scaled by rangeFactor and user counts scaled by userFactor. The scaled total (at least 1 user)
+ * is distributed over the bins in proportion to their current counts (largest remainder), so rounding never
+ * empties the cell.
+ */
+function scaleBins(bins: BinConfig[], rangeFactor: number, userFactor: number): BinConfig[] {
+  const baseTotal = bins.reduce((a, b) => a + b.userCount, 0);
+  const targetTotal = Math.max(1, Math.round(baseTotal * userFactor));
+  const exact = bins.map(b => (baseTotal > 0 ? b.userCount / baseTotal : 1 / bins.length) * targetTotal);
+  const counts = exact.map(Math.floor);
+  const order = exact.map((v, i) => ({ i, frac: v - Math.floor(v) })).sort((x, y) => y.frac - x.frac);
+  for (let n = targetTotal - counts.reduce((a, c) => a + c, 0), j = 0; n > 0; n--, j++) counts[order[j % order.length].i]++;
+  return bins.map((b, idx) => {
+    const r1 = Math.round(b.innerRadiusMeters * rangeFactor);
+    const r2 = Math.round(b.outerRadiusMeters * rangeFactor);
+    return {
+      ...b,
+      innerRadiusMeters: r1,
+      outerRadiusMeters: r2,
+      areaKm2: Number(((Math.PI * (r2 * r2 - r1 * r1)) / (3 * 1e6)).toFixed(4)),
+      userCount: counts[idx]
+    };
+  });
+}
+
+/**
+ * Monte Carlo simulation, followed by the capacity search and the cell range search when enabled.
+ * Each search re-runs the simulation (with at most 200 iterations per evaluation) and keeps the largest
+ * load / range that still meets the satisfaction and voice targets.
+ */
 export function executeMonteCarloSimulation(
+  lkbInputs: LinkBudgetInputs,
+  lkbResult: LinkBudgetCalculationResult,
+  bins: BinConfig[],
+  ueClasses: UeClassConfig[],
+  trafficProfiles: TrafficProfile[],
+  serviceCatalogue: ServiceDefinition[],
+  settings: SimulationSettings,
+  onProgress?: MonteCarloProgressCallback,
+  checkCancelled?: () => boolean
+): MonteCarloDashboardResults {
+  const result = runMonteCarloCore(lkbInputs, lkbResult, bins, ueClasses, trafficProfiles, serviceCatalogue, settings, onProgress, checkCancelled);
+  if (!settings.runCapacitySearch && !settings.runCellRangeSearch) return result;
+
+  const searchSettings: SimulationSettings = {
+    ...settings,
+    iterations: Math.min(settings.iterations, 200),
+    earlyConvergenceStop: false,
+    runCapacitySearch: false,
+    runCellRangeSearch: false
+  };
+  const evaluate = (searchBins: BinConfig[]) =>
+    runMonteCarloCore(lkbInputs, lkbResult, searchBins, ueClasses, trafficProfiles, serviceCatalogue, searchSettings);
+  const meetsTargets = (r: MonteCarloDashboardResults) =>
+    r.overallSatisfactionPercent >= settings.targetSatisfactionPercent &&
+    r.voiceSatisfactionPercent >= settings.targetVoiceSatisfactionPercent;
+  const cancelled = () => !!checkCancelled && checkCancelled();
+  const baseUsers = Math.max(1, bins.reduce((a, b) => a + b.userCount, 0));
+
+  // ---- Capacity search: largest user count (same bin shares) that meets the targets
+  if (settings.runCapacitySearch && !cancelled()) {
+    const MAX_USERS = 3000;
+    const curve = new Map<number, { userCount: number; satisfactionPercent: number; voiceSatisfactionPercent: number }>();
+    const test = (users: number) => {
+      const r = evaluate(scaleBins(bins, 1, users / baseUsers));
+      curve.set(users, { userCount: users, satisfactionPercent: r.overallSatisfactionPercent, voiceSatisfactionPercent: r.voiceSatisfactionPercent });
+      return meetsTargets(r);
+    };
+    let good = 0;
+    let bad = 0;
+    if (test(baseUsers)) {
+      good = baseUsers;
+      let n = baseUsers;
+      while (!bad && n < MAX_USERS && !cancelled()) {
+        n = Math.min(MAX_USERS, n * 2);
+        if (test(n)) good = n; else bad = n;
+      }
+    } else {
+      bad = baseUsers;
+      let n = baseUsers;
+      while (!good && n > 1 && !cancelled()) {
+        n = Math.max(1, Math.floor(n / 2));
+        if (test(n)) good = n; else bad = n;
+      }
+    }
+    while (good && bad && bad - good > Math.max(1, Math.round(good * 0.03)) && !cancelled()) {
+      const mid = Math.round((good + bad) / 2);
+      if (test(mid)) good = mid; else bad = mid;
+    }
+    const areaKm2 = sectorAreaKm2(bins);
+    result.cellCapacityUsersTotal = good;
+    result.cellCapacityUsersPerKm2 = Number((good / Math.max(0.05, areaKm2)).toFixed(1));
+    result.capacityCurve = [...curve.values()].sort((a, b) => a.userCount - b.userCount);
+    result.capacitySearchStatus = good === 0 ? 'TARGET_NOT_REACHABLE' : (!bad ? 'AT_UPPER_BOUND' : 'CONVERGED');
+  }
+
+  // ---- Cell range search: largest range (bins scaled) that meets the targets
+  if (settings.runCellRangeSearch && !cancelled()) {
+    const r0 = lkbResult.maxCellRangeMeters || Math.max(...bins.map(b => b.outerRadiusMeters));
+    const binsOuter = Math.max(1, ...bins.map(b => b.outerRadiusMeters));
+    const sensitivity: { rangeMeters: number; edgeSatisfactionPercent: number; cellThroughputMbps: number }[] = [];
+    const test = (k: number) => {
+      // k scales the LKB range; bins are scaled from their current outer radius to k * R_LKB
+      const rangeFactor = (k * r0) / binsOuter;
+      const userFactor = settings.rangeSearchDensityBasis === 'CONSTANT_USER_DENSITY' ? rangeFactor * rangeFactor : 1;
+      const r = evaluate(scaleBins(bins, rangeFactor, userFactor));
+      sensitivity.push({
+        rangeMeters: Math.round(k * r0),
+        edgeSatisfactionPercent: r.binResults[r.binResults.length - 1].satisfactionRatePercent,
+        cellThroughputMbps: r.meanCellThroughputDlMbps
+      });
+      return meetsTargets(r);
+    };
+    const K_MIN = 0.2;
+    const K_MAX = 1.5;
+    let kGood = 0;
+    let kBad = 0;
+    let status: MonteCarloDashboardResults['rangeSearchStatus'] = 'CONVERGED';
+    if (test(K_MAX)) {
+      kGood = K_MAX;
+      status = 'AT_UPPER_BOUND';
+    } else if (!test(K_MIN)) {
+      kGood = K_MIN;
+      status = 'TARGET_NOT_REACHABLE';
+    } else {
+      kGood = K_MIN;
+      kBad = K_MAX;
+      for (let i = 0; i < 7 && !cancelled(); i++) {
+        const mid = (kGood + kBad) / 2;
+        if (test(mid)) kGood = mid; else kBad = mid;
+      }
+    }
+    const recMeters = Math.round(kGood * r0);
+    result.recommendedCellRangeKm = Number((recMeters / 1000).toFixed(3));
+    result.recommendedIsdMeters = Math.round(recMeters * 1.5);
+    result.recommendedSitesPerKm2 = sitesPerKm2FromIsd(result.recommendedIsdMeters);
+    result.cellRangeDeltaPercent = Number(((kGood - 1) * 100).toFixed(1));
+    result.cellRangeSensitivity = sensitivity.sort((a, b) => a.rangeMeters - b.rangeMeters);
+    result.rangeSearchStatus = status;
+  }
+
+  return result;
+}
+
+function runMonteCarloCore(
   lkbInputs: LinkBudgetInputs,
   lkbResult: LinkBudgetCalculationResult,
   bins: BinConfig[],
@@ -512,6 +668,7 @@ export function executeMonteCarloSimulation(
   // Per-bin accumulators
   const binStats = bins.map(() => ({
     userCount: 0,
+    activeCount: 0,
     satisfiedCount: 0,
     dlSinrSum: 0,
     ulSinrSum: 0,
@@ -532,6 +689,31 @@ export function executeMonteCarloSimulation(
   const prbServiceMap = new Map<ServiceType, { dl: number; ul: number }>();
   let totalVoNrCalls = 0;
   let blockedVoNrCalls = 0;
+  let carriedVoNrCalls = 0;
+
+  // Traffic profile: per-bin override, else the profile selected in the UI, else the first one
+  const defaultProfile = trafficProfiles.find(p => p.id === settings.trafficProfileId) ?? trafficProfiles[0];
+  const binProfiles = bins.map(b => trafficProfiles.find(p => p.id === b.trafficProfileId) ?? defaultProfile);
+
+  // Per-iteration PRB utilisation (allocated PRBs / carrier PRBs)
+  const ulPrbPool = Math.floor(prbCount * 0.8);
+  const iterationDlPrbUtil: number[] = [];
+  const iterationUlPrbUtil: number[] = [];
+
+  // CDF samples (reservoir sampling with its own PRNG so the simulation's random sequence is unchanged)
+  const CDF_SAMPLE_CAP = 20000;
+  const cdfRand = createMulberry32((settings.seed || 101) + 7919);
+  const sinrSamples: { dl: number; ul: number }[] = [];
+  const rateSamples: { dl: number; ul: number }[] = [];
+  let sinrSeen = 0;
+  let rateSeen = 0;
+  const addSample = <T,>(arr: T[], item: T, seen: number) => {
+    if (arr.length < CDF_SAMPLE_CAP) arr.push(item);
+    else {
+      const j = Math.floor(cdfRand() * seen);
+      if (j < CDF_SAMPLE_CAP) arr[j] = item;
+    }
+  };
 
   const totalIterations = Math.max(100, settings.iterations);
   let convergedEarly = false;
@@ -581,19 +763,25 @@ export function executeMonteCarloSimulation(
         }
 
         // Service & Traffic profile selection
-        const prof = trafficProfiles[0];
+        const prof = binProfiles[bIdx];
         const sMixRoll = rand() * 100;
         let chosenServiceId: ServiceType = 'MBB_PS_DATA';
+        let chosenMix = prof.serviceMix[0];
         let cumService = 0;
         for (const sm of prof.serviceMix) {
           cumService += sm.weight;
           if (sMixRoll <= cumService) {
             chosenServiceId = sm.serviceId;
+            chosenMix = sm;
             break;
           }
         }
 
         const servDef = serviceCatalogue.find(s => s.id === chosenServiceId) || serviceCatalogue[0];
+        // Rate targets of the selected traffic profile, falling back to the service catalogue
+        const mixEntry = chosenMix?.serviceId === chosenServiceId ? chosenMix : undefined;
+        const targetDlRateMbps = mixEntry?.targetRateDlMbps ?? servDef.dlTargetRateMbps;
+        const targetUlRateMbps = mixEntry?.targetRateUlMbps ?? servDef.ulTargetRateMbps;
         const isActiveInBh = rand() * 100 < (servDef.isGbr ? servDef.erlangsPerUser * 100 * 5 : 80);
 
         // Body loss from the LKB, not applied to fixed CPE terminals
@@ -677,6 +865,8 @@ export function executeMonteCarloSimulation(
           ueClassId: ueClass.id,
           serviceId: chosenServiceId,
           isActiveInBh,
+          targetDlRateMbps,
+          targetUlRateMbps,
           pathLossDlDb: Number(totalDlPlDb.toFixed(1)),
           pathLossUlDb: Number(totalUlPlDb.toFixed(1)),
           shadowFadingDb: Number(shadowFadingDb.toFixed(1)),
@@ -735,15 +925,16 @@ export function executeMonteCarloSimulation(
 
       // Calculate required PRBs
       const ratePerPrbDl = calculate3GppPeakThroughput(gbrU.rank, 4, 1.0, 600 / 1024, 1, scsKhz, overheadRatio, tddFraction);
-      const prbsNeeded = Math.max(1, Math.ceil(sDef.dlTargetRateMbps / Math.max(0.005, ratePerPrbDl)));
+      const prbsNeeded = Math.max(1, Math.ceil((gbrU.targetDlRateMbps ?? sDef.dlTargetRateMbps) / Math.max(0.005, ratePerPrbDl)));
 
       if (availableDlPrbs >= prbsNeeded) {
         availableDlPrbs -= prbsNeeded;
         availableUlPrbs = Math.max(0, availableUlPrbs - prbsNeeded);
         gbrU.allocatedPrbsDl = prbsNeeded;
         gbrU.allocatedPrbsUl = prbsNeeded;
-        gbrU.achievedDlRateMbps = sDef.dlTargetRateMbps;
-        gbrU.achievedUlRateMbps = sDef.ulTargetRateMbps;
+        gbrU.achievedDlRateMbps = gbrU.targetDlRateMbps ?? sDef.dlTargetRateMbps;
+        gbrU.achievedUlRateMbps = gbrU.targetUlRateMbps ?? sDef.ulTargetRateMbps;
+        if (sDef.id === 'VONR_VOLTE') carriedVoNrCalls++;
         gbrU.isSatisfied = true;
         gbrU.violationReason = 'NONE';
       } else {
@@ -809,10 +1000,12 @@ export function executeMonteCarloSimulation(
         u.achievedDlRateMbps = Number((u.allocatedPrbsDl * ratePerPrb * 0.90).toFixed(2));
         u.achievedUlRateMbps = Number((u.allocatedPrbsUl * ratePerPrb * 0.35).toFixed(2));
 
-        if (u.isPowerLimited && u.achievedUlRateMbps < sDef.ulTargetRateMbps * 0.7) {
+        const dlTarget = u.targetDlRateMbps ?? sDef.dlTargetRateMbps;
+        const ulTarget = u.targetUlRateMbps ?? sDef.ulTargetRateMbps;
+        if (u.isPowerLimited && u.achievedUlRateMbps < ulTarget * 0.7) {
           u.isSatisfied = false;
           u.violationReason = 'UL_POWER_LIMITED';
-        } else if (u.achievedDlRateMbps >= sDef.dlTargetRateMbps * 0.8) {
+        } else if (u.achievedDlRateMbps >= dlTarget * 0.8) {
           u.isSatisfied = true;
           u.violationReason = 'NONE';
         } else if (u.allocatedPrbsDl <= 2) {
@@ -823,6 +1016,18 @@ export function executeMonteCarloSimulation(
           u.violationReason = 'RATE_BELOW_TARGET';
         }
       }
+    }
+
+    // PRB utilisation of this drop
+    const usedDlPrbs = activeUsers.reduce((sum, u) => sum + u.allocatedPrbsDl, 0);
+    const usedUlPrbs = activeUsers.reduce((sum, u) => sum + u.allocatedPrbsUl, 0);
+    iterationDlPrbUtil.push(Math.min(100, (usedDlPrbs / prbCount) * 100));
+    iterationUlPrbUtil.push(Math.min(100, (usedUlPrbs / Math.max(1, ulPrbPool)) * 100));
+
+    // CDF samples: SINR over all dropped users, throughput over active users
+    for (const u of currentIterationUsers) {
+      addSample(sinrSamples, { dl: u.dlSinrDb, ul: u.ulSinrDb }, ++sinrSeen);
+      if (u.isActiveInBh) addSample(rateSamples, { dl: u.achievedDlRateMbps, ul: u.achievedUlRateMbps }, ++rateSeen);
     }
 
     // Cell throughput for this iteration
@@ -840,7 +1045,8 @@ export function executeMonteCarloSimulation(
     for (const u of currentIterationUsers) {
       const bStat = binStats[u.binIndex - 1];
       bStat.userCount++;
-      if (u.isSatisfied) bStat.satisfiedCount++;
+      if (u.isActiveInBh) bStat.activeCount++;
+      if (u.isActiveInBh && u.isSatisfied) bStat.satisfiedCount++;
       bStat.dlSinrSum += u.dlSinrDb;
       bStat.ulSinrSum += u.ulSinrDb;
       bStat.dlRateSum += u.achievedDlRateMbps;
@@ -850,7 +1056,7 @@ export function executeMonteCarloSimulation(
       bStat.prbDlSum += u.allocatedPrbsDl;
       bStat.prbUlSum += u.allocatedPrbsUl;
 
-      if (!u.isSatisfied) {
+      if (u.isActiveInBh && !u.isSatisfied) {
         if (u.violationReason === 'OUTAGE_COVERAGE') bStat.outageCount++;
         else if (u.violationReason === 'PRB_CONGESTION') bStat.congestionCount++;
         else if (u.violationReason === 'UL_POWER_LIMITED') bStat.powerLimitedCount++;
@@ -909,7 +1115,8 @@ export function executeMonteCarloSimulation(
   const binResults: BinResultSummary[] = bins.map((bin, idx) => {
     const stat = binStats[idx];
     const totalUsersInBin = Math.max(1, stat.userCount);
-    const satRate = Number(((stat.satisfiedCount / totalUsersInBin) * 100).toFixed(1));
+    const activeUsersInBin = Math.max(1, stat.activeCount);
+    const satRate = stat.activeCount > 0 ? Number(((stat.satisfiedCount / activeUsersInBin) * 100).toFixed(1)) : 100;
 
     return {
       binIndex: bin.binIndex,
@@ -917,14 +1124,15 @@ export function executeMonteCarloSimulation(
       outerRadiusMeters: bin.outerRadiusMeters,
       userCount: bin.userCount,
       satisfiedCount: Math.round(stat.satisfiedCount / completedIterations),
-      violatedCount: Math.round((totalUsersInBin - stat.satisfiedCount) / completedIterations),
+      violatedCount: Math.round((stat.activeCount - stat.satisfiedCount) / completedIterations),
       satisfactionRatePercent: satRate,
       meanDlSinrDb: Number((stat.dlSinrSum / totalUsersInBin).toFixed(1)),
       meanUlSinrDb: Number((stat.ulSinrSum / totalUsersInBin).toFixed(1)),
       dominantMcs: Math.round(stat.mcsSum / totalUsersInBin),
       meanRank: Number((stat.rankSum / totalUsersInBin).toFixed(2)),
-      meanDlRateMbps: Number((stat.dlRateSum / totalUsersInBin).toFixed(2)),
-      meanUlRateMbps: Number((stat.ulRateSum / totalUsersInBin).toFixed(2)),
+      // Rates averaged over active users (idle users have no traffic)
+      meanDlRateMbps: Number((stat.dlRateSum / activeUsersInBin).toFixed(2)),
+      meanUlRateMbps: Number((stat.ulRateSum / activeUsersInBin).toFixed(2)),
       prbUtilizationPercent: Number(((stat.prbDlSum / (completedIterations * prbCount)) * 100).toFixed(1)),
       violationReasons: {
         outageCount: Math.round(stat.outageCount / completedIterations),
@@ -936,18 +1144,25 @@ export function executeMonteCarloSimulation(
   });
 
   // Overall Satisfaction & Outage
+  // Satisfaction and outage over users active in the busy hour (idle users have no demand to satisfy)
+  const totalActive = binStats.reduce((acc, b) => acc + b.activeCount, 0);
   const totalSatisfied = binStats.reduce((acc, b) => acc + b.satisfiedCount, 0);
-  const overallSatPercent = Number(((totalSatisfied / totalDropped) * 100).toFixed(1));
+  const overallSatPercent = totalActive > 0 ? Number(((totalSatisfied / totalActive) * 100).toFixed(1)) : 100;
   const totalOutage = binStats.reduce((acc, b) => acc + b.outageCount, 0);
-  const coverageOutagePercent = Number(((totalOutage / totalDropped) * 100).toFixed(1));
+  const coverageOutagePercent = totalActive > 0 ? Number(((totalOutage / totalActive) * 100).toFixed(1)) : 0;
 
   // Voice metrics & Erlang-B
   const voiceBlockPercent = totalVoNrCalls > 0
     ? Number(((blockedVoNrCalls / totalVoNrCalls) * 100).toFixed(2))
     : 0.0;
   const voiceSatPercent = Number((100 - voiceBlockPercent).toFixed(1));
-  const simultaneousVoNr = Math.round(prbCount * 0.7);
-  const voiceErlangsCarried = Number((simultaneousVoNr * 0.85).toFixed(1));
+  // PRB-limited simultaneous VoNR calls: available PRBs / PRBs per call (same GBR sizing as the scheduler, rank 1)
+  const voiceDef = serviceCatalogue.find(sv => sv.id === 'VONR_VOLTE');
+  const voiceRatePerPrbDl = calculate3GppPeakThroughput(1, 4, 1.0, 600 / 1024, 1, scsKhz, overheadRatio, tddFraction);
+  const prbsPerVoiceCall = Math.max(1, Math.ceil((voiceDef?.dlTargetRateMbps ?? 0.045) / Math.max(0.005, voiceRatePerPrbDl)));
+  const simultaneousVoNr = Math.max(0, Math.floor((prbCount - reservedPrbs) / prbsPerVoiceCall));
+  // Carried voice traffic: mean admitted VoNR calls per busy-hour snapshot (Erlangs)
+  const voiceErlangsCarried = Number((carriedVoNrCalls / completedIterations).toFixed(1));
 
   // Limiting Factor Detection
   let limitingFactor: 'DL_CAPACITY' | 'UL_CAPACITY' | 'UL_COVERAGE' | 'GBR_CONGESTION' | 'NONE' = 'NONE';
@@ -962,25 +1177,18 @@ export function executeMonteCarloSimulation(
     limitingFactor = 'DL_CAPACITY';
   }
 
-  // Recommended Cell Range & ISD
+  // Recommended Cell Range & ISD: the LKB range unless the cell range search (below) replaces it
   const edgeBin = binResults[binResults.length - 1];
-  let rangeScaling = 1.0;
-  if (edgeBin.satisfactionRatePercent < 90) {
-    rangeScaling = Math.max(0.65, edgeBin.satisfactionRatePercent / 95);
-  }
-  const recommendedRangeMeters = Math.round((lkbResult.maxCellRangeMeters || 1000) * rangeScaling);
+  const recommendedRangeMeters = lkbResult.maxCellRangeMeters || 1000;
   const recommendedRangeKm = Number((recommendedRangeMeters / 1000).toFixed(3));
   const recommendedIsdMeters = Math.round(recommendedRangeMeters * 1.5);
-  const cellAreaKm2 = (3 * Math.sqrt(3) / 2) * Math.pow(recommendedIsdMeters / 1000, 2);
-  const recommendedSitesPerKm2 = Number((1 / Math.max(0.1, cellAreaKm2)).toFixed(2));
-  const rangeDeltaPercent = Number(((rangeScaling - 1.0) * 100).toFixed(1));
+  const recommendedSitesPerKm2 = sitesPerKm2FromIsd(recommendedIsdMeters);
+  const rangeDeltaPercent = 0;
 
-  // Cell Capacity (users / cell & users / km2)
+  // Cell Capacity: satisfied active users per drop at the current load, unless the capacity search replaces it
   const totalCurrentUsers = bins.reduce((a, b) => a + b.userCount, 0);
-  const cellCapacityUsersTotal = overallSatPercent >= 95
-    ? Math.round(totalCurrentUsers * (overallSatPercent / 90))
-    : Math.round(totalCurrentUsers * (overallSatPercent / 100));
-  const currentCellAreaKm2 = (Math.PI * Math.pow((lkbResult.maxCellRangeMeters || 1000) / 1000, 2)) / 3;
+  const cellCapacityUsersTotal = Math.round(totalSatisfied / completedIterations);
+  const currentCellAreaKm2 = sectorAreaKm2(bins);
   const cellCapacityUsersPerKm2 = Number((cellCapacityUsersTotal / Math.max(0.05, currentCellAreaKm2)).toFixed(1));
 
   // Jain's Fairness Index on Bins Average Throughput
@@ -989,22 +1197,43 @@ export function executeMonteCarloSimulation(
   const sumSqRates = binRates.reduce((a, b) => a + b * b, 0);
   const jainsIndex = Number(((sumRates * sumRates) / (binRates.length * sumSqRates)).toFixed(3));
 
-  // CDF Points
+  // CDF Points from the simulated users (SINR: all users, throughput: active users)
+  const percentileOf = (sorted: number[], p: number) => {
+    if (sorted.length === 0) return 0;
+    const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1));
+    return sorted[idx];
+  };
+  const dlSinrSorted = sinrSamples.map(x => x.dl).sort((a, b) => a - b);
+  const ulSinrSorted = sinrSamples.map(x => x.ul).sort((a, b) => a - b);
+  const dlRateSorted = rateSamples.map(x => x.dl).sort((a, b) => a - b);
+  const ulRateSorted = rateSamples.map(x => x.ul).sort((a, b) => a - b);
   const sinrCdf: { percentile: number; dlSinrDb: number; ulSinrDb: number }[] = [];
   const throughputCdf: { percentile: number; dlRateMbps: number; ulRateMbps: number }[] = [];
   for (let p = 5; p <= 95; p += 10) {
-    const frac = p / 100;
-    const dlSinr = Number((-6.0 + frac * 28.0).toFixed(1));
-    const ulSinr = Number((-5.0 + frac * 22.0).toFixed(1));
-    const dlRate = Number((0.5 + Math.pow(frac, 1.8) * (peakDlMbps * 0.45)).toFixed(2));
-    const ulRate = Number((0.2 + Math.pow(frac, 1.5) * (peakUlMbps * 0.40)).toFixed(2));
-    sinrCdf.push({ percentile: p, dlSinrDb: dlSinr, ulSinrDb: ulSinr });
-    throughputCdf.push({ percentile: p, dlRateMbps: dlRate, ulRateMbps: ulRate });
+    sinrCdf.push({
+      percentile: p,
+      dlSinrDb: Number(percentileOf(dlSinrSorted, p).toFixed(1)),
+      ulSinrDb: Number(percentileOf(ulSinrSorted, p).toFixed(1))
+    });
+    throughputCdf.push({
+      percentile: p,
+      dlRateMbps: Number(percentileOf(dlRateSorted, p).toFixed(2)),
+      ulRateMbps: Number(percentileOf(ulRateSorted, p).toFixed(2))
+    });
   }
+  const p5DlRate = Number(percentileOf(dlRateSorted, 5).toFixed(2));
+  const p5UlRate = Number(percentileOf(ulRateSorted, 5).toFixed(2));
+  const medianDlRate = Number(percentileOf(dlRateSorted, 50).toFixed(2));
+  const medianUlRate = Number(percentileOf(ulRateSorted, 50).toFixed(2));
+
+  // PRB utilisation statistics over drops
+  const meanOf = (arr: number[]) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+  const dlUtilSorted = [...iterationDlPrbUtil].sort((a, b) => a - b);
+  const ulUtilSorted = [...iterationUlPrbUtil].sort((a, b) => a - b);
 
   // MCS & Rank Histograms
   const totalMcsSamples = Array.from(mcsHistMap.values()).reduce((a, b) => a + b, 0) || 1;
-  const mcsHistogram = Array.from({ length: 16 }, (_, i) => ({
+  const mcsHistogram = Array.from({ length: 29 }, (_, i) => ({
     mcs: i,
     count: mcsHistMap.get(i) || 0,
     percentage: Number((((mcsHistMap.get(i) || 0) / totalMcsSamples) * 100).toFixed(1))
@@ -1030,23 +1259,12 @@ export function executeMonteCarloSimulation(
     };
   });
 
-  // Capacity Curve (Users vs % Satisfied)
+  // Capacity curve and range sensitivity: the current operating point; the searches add their evaluated points
   const capacityCurve = [
-    { userCount: Math.round(totalCurrentUsers * 0.4), satisfactionPercent: 99.5, voiceSatisfactionPercent: 99.8 },
-    { userCount: Math.round(totalCurrentUsers * 0.7), satisfactionPercent: 98.2, voiceSatisfactionPercent: 99.5 },
-    { userCount: totalCurrentUsers, satisfactionPercent: overallSatPercent, voiceSatisfactionPercent: voiceSatPercent },
-    { userCount: Math.round(totalCurrentUsers * 1.3), satisfactionPercent: Math.max(50, overallSatPercent - 8), voiceSatisfactionPercent: Math.max(70, voiceSatPercent - 3) },
-    { userCount: Math.round(totalCurrentUsers * 1.7), satisfactionPercent: Math.max(30, overallSatPercent - 22), voiceSatisfactionPercent: Math.max(50, voiceSatPercent - 10) }
+    { userCount: totalCurrentUsers, satisfactionPercent: overallSatPercent, voiceSatisfactionPercent: voiceSatPercent }
   ];
-
-  // Cell Range Sensitivity Curve
-  const r0 = lkbResult.maxCellRangeMeters || 1000;
   const cellRangeSensitivity = [
-    { rangeMeters: Math.round(r0 * 0.6), edgeSatisfactionPercent: 99.0, cellThroughputMbps: meanDlCellRate * 1.15 },
-    { rangeMeters: Math.round(r0 * 0.8), edgeSatisfactionPercent: 96.5, cellThroughputMbps: meanDlCellRate * 1.08 },
-    { rangeMeters: r0, edgeSatisfactionPercent: edgeBin.satisfactionRatePercent, cellThroughputMbps: meanDlCellRate },
-    { rangeMeters: Math.round(r0 * 1.2), edgeSatisfactionPercent: Math.max(40, edgeBin.satisfactionRatePercent - 18), cellThroughputMbps: meanDlCellRate * 0.88 },
-    { rangeMeters: Math.round(r0 * 1.4), edgeSatisfactionPercent: Math.max(20, edgeBin.satisfactionRatePercent - 35), cellThroughputMbps: meanDlCellRate * 0.74 }
+    { rangeMeters: recommendedRangeMeters, edgeSatisfactionPercent: edgeBin.satisfactionRatePercent, cellThroughputMbps: meanDlCellRate }
   ];
 
   // Convergence Trace
@@ -1145,16 +1363,16 @@ export function executeMonteCarloSimulation(
     peak38306ThroughputUlMbps: peakUlMbps,
     cellSpectralEfficiencyDl: cellSeDl,
     cellSpectralEfficiencyUl: cellSeUl,
-    userThroughput5thPercentileDlMbps: throughputCdf[0].dlRateMbps,
-    userThroughput5thPercentileUlMbps: throughputCdf[0].ulRateMbps,
-    userThroughputMedianDlMbps: throughputCdf[Math.floor(throughputCdf.length / 2)].dlRateMbps,
-    userThroughputMedianUlMbps: throughputCdf[Math.floor(throughputCdf.length / 2)].ulRateMbps,
+    userThroughput5thPercentileDlMbps: p5DlRate,
+    userThroughput5thPercentileUlMbps: p5UlRate,
+    userThroughputMedianDlMbps: medianDlRate,
+    userThroughputMedianUlMbps: medianUlRate,
     overallSatisfactionPercent: overallSatPercent,
     voiceSatisfactionPercent: voiceSatPercent,
-    prbUtilizationDlMeanPercent: Number((((prbCount - reservedPrbs) * 0.85 / prbCount) * 100).toFixed(1)),
-    prbUtilizationDlP95Percent: Number((((prbCount - reservedPrbs) * 0.98 / prbCount) * 100).toFixed(1)),
-    prbUtilizationUlMeanPercent: Number(((((prbCount * 0.8) - reservedPrbs) * 0.70 / (prbCount * 0.8)) * 100).toFixed(1)),
-    prbUtilizationUlP95Percent: Number(((((prbCount * 0.8) - reservedPrbs) * 0.92 / (prbCount * 0.8)) * 100).toFixed(1)),
+    prbUtilizationDlMeanPercent: Number(meanOf(iterationDlPrbUtil).toFixed(1)),
+    prbUtilizationDlP95Percent: Number(percentileOf(dlUtilSorted, 95).toFixed(1)),
+    prbUtilizationUlMeanPercent: Number(meanOf(iterationUlPrbUtil).toFixed(1)),
+    prbUtilizationUlP95Percent: Number(percentileOf(ulUtilSorted, 95).toFixed(1)),
     voiceSimultaneousCallsSupported: simultaneousVoNr,
     voiceErlangsCarried,
     voiceBlockingProbabilityPercent: voiceBlockPercent,
@@ -1164,6 +1382,8 @@ export function executeMonteCarloSimulation(
     recommendedIsdMeters,
     recommendedSitesPerKm2,
     cellRangeDeltaPercent: rangeDeltaPercent,
+    capacitySearchStatus: 'NOT_RUN',
+    rangeSearchStatus: 'NOT_RUN',
     jainsFairnessIndex: jainsIndex,
     dlUlThroughputRatio: Number((meanDlCellRate / Math.max(0.1, meanUlCellRate)).toFixed(1)),
     binResults,

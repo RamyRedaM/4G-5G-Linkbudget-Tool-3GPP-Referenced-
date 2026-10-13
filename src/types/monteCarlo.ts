@@ -119,6 +119,9 @@ export interface SimulationSettings {
   // New Cell Range Search Settings
   runCellRangeSearch: boolean;
   rangeSearchDensityBasis: 'CONSTANT_USER_DENSITY' | 'CONSTANT_USER_COUNT';
+
+  // Traffic profile applied to bins without their own profile
+  trafficProfileId?: string;
 }
 
 // ----------------------------------------------------
@@ -135,6 +138,8 @@ export interface SimulatedUserRecord {
   ueClassId: string;
   serviceId: ServiceType;
   isActiveInBh: boolean;
+  targetDlRateMbps?: number; // rate target of the user's service in the selected traffic profile
+  targetUlRateMbps?: number;
   
   // Radio parameters
   pathLossDlDb: number;
@@ -254,6 +259,8 @@ export interface MonteCarloDashboardResults {
   
   // Bins Breakdown
   binResults: BinResultSummary[];
+  capacitySearchStatus?: 'NOT_RUN' | 'CONVERGED' | 'AT_UPPER_BOUND' | 'TARGET_NOT_REACHABLE';
+  rangeSearchStatus?: 'NOT_RUN' | 'CONVERGED' | 'AT_UPPER_BOUND' | 'TARGET_NOT_REACHABLE';
   pathLossDiagnostics?: PathLossDiagnostics;
   
   // CDF Curves

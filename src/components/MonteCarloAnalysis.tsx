@@ -66,6 +66,20 @@ interface MonteCarloAnalysisProps {
   inputs: LinkBudgetInputs;
 }
 
+const CAPACITY_STATUS_LABEL: Record<string, string> = {
+  NOT_RUN: 'Satisfied users at current load (capacity search off)',
+  CONVERGED: 'Max load meeting the targets (capacity search)',
+  AT_UPPER_BOUND: 'Targets still met at the 3,000-user search limit',
+  TARGET_NOT_REACHABLE: 'Targets not met even with 1 user'
+};
+
+const RANGE_STATUS_TEXT: Record<string, string> = {
+  NOT_RUN: 'Cell range search is off, so this is the LKB range.',
+  CONVERGED: 'Largest range at which the satisfaction and voice targets are still met (cell range search).',
+  AT_UPPER_BOUND: 'Targets are still met at 1.5 × the LKB range, the upper limit of the search.',
+  TARGET_NOT_REACHABLE: 'Targets are not met even at 0.2 × the LKB range, the lower limit of the search.'
+};
+
 export const MonteCarloAnalysis: React.FC<MonteCarloAnalysisProps> = ({ result, inputs: lkbInputs }) => {
   // Main Tab Navigation
   const [activeTab, setActiveTab] = useState<'TAB1_SCENARIO' | 'TAB2_BINS' | 'TAB3_TRAFFIC' | 'TAB4_SETTINGS' | 'TAB5_RESULTS'>('TAB1_SCENARIO');
@@ -229,7 +243,7 @@ export const MonteCarloAnalysis: React.FC<MonteCarloAnalysisProps> = ({ result, 
         ueClasses,
         trafficProfiles,
         serviceCatalogue,
-        { ...settings, iterations: 600 }
+        { ...settings, iterations: 600, trafficProfileId: selectedProfileId }
       );
       setDashboardResults(initRes);
     }
@@ -252,7 +266,7 @@ export const MonteCarloAnalysis: React.FC<MonteCarloAnalysisProps> = ({ result, 
           ueClasses,
           trafficProfiles,
           serviceCatalogue,
-          settings,
+          { ...settings, trafficProfileId: selectedProfileId },
           (prog, iter, tot) => {
             setProgress(prog);
             setCurrentIter(iter);
@@ -1593,6 +1607,9 @@ export const MonteCarloAnalysis: React.FC<MonteCarloAnalysisProps> = ({ result, 
               <span className="text-[10px] text-slate-500 block">
                 {dashboardResults.cellCapacityUsersPerKm2} users / km²
               </span>
+              <span className="text-[10px] text-slate-500 block">
+                {CAPACITY_STATUS_LABEL[dashboardResults.capacitySearchStatus ?? 'NOT_RUN']}
+              </span>
             </div>
 
             {/* Card 2: Mean Cell Throughput */}
@@ -1741,13 +1758,16 @@ export const MonteCarloAnalysis: React.FC<MonteCarloAnalysisProps> = ({ result, 
 
               <div className="h-56 flex items-end gap-1.5 pt-6 pb-2 border-b border-l border-slate-800 relative bg-slate-950/40 rounded px-2">
                 {/* 50% Median Guideline */}
-                <div className="absolute inset-x-2 top-1/2 border-b border-slate-700/50 border-dashed pointer-events-none">
-                  <span className="text-[9px] text-slate-500 font-mono absolute -top-3.5 right-1">50th Percentile (Median)</span>
+                {/* Bars scaled to the highest simulated percentile value */}
+                <div className="absolute inset-x-2 top-6 border-b border-slate-700/50 border-dashed pointer-events-none">
+                  <span className="text-[9px] text-slate-500 font-mono absolute -top-3.5 right-1">
+                    {Math.max(...dashboardResults.throughputCdf.map(c => c.dlRateMbps)).toFixed(1)} Mbps
+                  </span>
                 </div>
                 {dashboardResults.throughputCdf.map((item, i) => (
                   <div key={i} className="flex-1 flex flex-col items-center h-full justify-end group relative cursor-pointer">
                     <div
-                      style={{ height: `${Math.min(100, Math.max(6, (item.dlRateMbps / (dashboardResults.peak38306ThroughputDlMbps * 0.5)) * 100))}%` }}
+                      style={{ height: `${Math.min(100, Math.max(2, (item.dlRateMbps / Math.max(0.01, ...dashboardResults.throughputCdf.map(c => c.dlRateMbps))) * 100))}%` }}
                       className="w-full bg-gradient-to-t from-cyan-600/70 to-cyan-400 hover:from-cyan-400 hover:to-cyan-200 rounded-t transition-all shadow-sm"
                     />
                     <span className="text-[8px] text-slate-400 font-mono mt-1.5">{item.percentile}%</span>
@@ -1787,14 +1807,17 @@ export const MonteCarloAnalysis: React.FC<MonteCarloAnalysisProps> = ({ result, 
                     Cell Capacity Curve (Load vs % Satisfied)
                   </h4>
                 </div>
-                <span className="text-[10px] text-emerald-400/90 font-mono font-semibold">Target: ≥95% Target</span>
+                <span className="text-[10px] text-emerald-400/90 font-mono font-semibold">Target: ≥{settings.targetSatisfactionPercent}% of active users</span>
               </div>
 
               <div className="h-56 flex items-end gap-2.5 pt-6 pb-2 border-b border-l border-slate-800 relative bg-slate-950/40 rounded px-2">
                 {/* 95% Satisfaction Target Line */}
-                <div className="absolute inset-x-2 bottom-[95%] border-b border-emerald-500/60 border-dashed pointer-events-none">
+                <div
+                  className="absolute inset-x-2 border-b border-emerald-500/60 border-dashed pointer-events-none"
+                  style={{ bottom: `${settings.targetSatisfactionPercent}%` }}
+                >
                   <span className="text-[9px] text-emerald-400 font-mono absolute -top-3.5 right-1 bg-slate-950/80 px-1 rounded">
-                    Target 95% Cutoff
+                    Target {settings.targetSatisfactionPercent}%
                   </span>
                 </div>
                 {dashboardResults.capacityCurve.map((c, i) => (
@@ -1802,7 +1825,7 @@ export const MonteCarloAnalysis: React.FC<MonteCarloAnalysisProps> = ({ result, 
                     <div
                       style={{ height: `${c.satisfactionPercent}%` }}
                       className={`w-full rounded-t transition-all shadow-sm ${
-                        c.satisfactionPercent >= 95
+                        c.satisfactionPercent >= settings.targetSatisfactionPercent
                           ? 'bg-gradient-to-t from-emerald-600/80 to-emerald-400 hover:from-emerald-400 hover:to-emerald-200'
                           : 'bg-gradient-to-t from-amber-600/80 to-amber-400 hover:from-amber-400 hover:to-amber-200'
                       }`}
@@ -1822,7 +1845,7 @@ export const MonteCarloAnalysis: React.FC<MonteCarloAnalysisProps> = ({ result, 
               <div className="grid grid-cols-3 gap-2 pt-1 text-[11px] font-mono">
                 <div className="bg-slate-950/80 p-2 rounded border border-slate-800/80">
                   <span className="text-[9px] text-slate-500 block">SATISFACTION TARGET</span>
-                  <strong className="text-emerald-400">≥ 95% All Users</strong>
+                  <strong className="text-emerald-400">≥ {settings.targetSatisfactionPercent}% active users</strong>
                 </div>
                 <div className="bg-slate-950/80 p-2 rounded border border-slate-800/80">
                   <span className="text-[9px] text-slate-500 block">MAX CAPACITY (CELL)</span>
@@ -2530,7 +2553,8 @@ export const MonteCarloAnalysis: React.FC<MonteCarloAnalysisProps> = ({ result, 
               </h4>
             </div>
             <p className="text-slate-300">
-              To guarantee that 100% of spatial bins meet the satisfaction threshold under the current traffic profile, the recommended cell range is{' '}
+              {RANGE_STATUS_TEXT[dashboardResults.rangeSearchStatus ?? 'NOT_RUN']}{' '}
+              Recommended cell range{' '}
               <strong className="text-white">{dashboardResults.recommendedCellRangeKm} km</strong> (ISD ={' '}
               <strong className="text-white">{dashboardResults.recommendedIsdMeters} m</strong>, requires{' '}
               <strong className="text-cyan-300">{dashboardResults.recommendedSitesPerKm2} sites/km²</strong>).
