@@ -25,7 +25,7 @@ export function exportMonteCarloScenarioJson(
   settings: SimulationSettings
 ): string {
   const data: MonteCarloScenarioData = {
-    version: '1.33.4',
+    version: '1.33.5',
     timestamp: new Date().toISOString(),
     lkbInputs,
     bins,
@@ -1026,7 +1026,7 @@ export function generatePrintableReportHtml(
 
     <!-- Report Footer -->
     <div style="border-top:1px solid #e2e8f0; padding-top:12px; margin-top:24px; display:flex; justify-content:space-between; align-items:center; font-family:monospace; font-size:9px; color:#94a3b8;">
-      <div>4G-5G LKB (3GPP Reference) · Ver 1.33.4 · Built with 3GPP TS 38.101, TS 38.104, TS 38.211, TS 38.213, TS 38.214, TS 38.306, TR 38.901</div>
+      <div>4G-5G LKB (3GPP Reference) · Ver 1.33.5 · Built with 3GPP TS 38.101, TS 38.104, TS 38.211, TS 38.213, TS 38.214, TS 38.306, TR 38.901</div>
       <div>Page 1 of 2 (Executive Print View)</div>
     </div>
   </div>
@@ -1130,7 +1130,7 @@ export function exportStandaloneHtmlTool(
         <p class="text-xs text-slate-400">Companion to 4G/5G Link Budget (LKB) Tool · TS 38.101, TS 38.214, TS 38.306, TR 38.901</p>
       </div>
       <div class="text-xs text-slate-500">
-        Ver 1.33.4 · Single Self-Contained HTML
+        Ver 1.33.5 · Single Self-Contained HTML
       </div>
     </div>
 
