@@ -17,7 +17,14 @@ import {
   VoNrCodec,
   VoLteCodec,
   RedCapProfile,
-  McxProfile
+  McxProfile,
+  OverheadMode,
+  DmrsConfigType,
+  CsiRsMultiplexingType,
+  CsiRsResourceType,
+  InterferenceScenarioType,
+  InterferenceHexLayoutTiers,
+  InterferenceMarginMethod
 } from '../types/telecom';
 import { TELECOM_BANDS, TDD_FRAME_PATTERNS, POPULAR_CA_COMBOS } from '../data/telecomBands';
 import {
@@ -41,13 +48,15 @@ import {
   Wifi,
   ShieldAlert,
   Sparkles,
-  CheckCircle2
+  CheckCircle2,
+  Compass
 } from 'lucide-react';
-import { calculateControlOverheads, calculateLinkBudget } from '../utils/linkBudgetCalculator';
+import { calculateControlOverheads, calculateLinkBudget, calculate5GOverhead } from '../utils/linkBudgetCalculator';
 import {
   calculateShadowFadingMargin,
   calculateStdDevFromMargin,
-  getGaussianZ
+  getGaussianZ,
+  getBuildingPenetrationLoss
 } from '../utils/spmPropagation';
 
 interface InputPanelProps {
@@ -60,7 +69,8 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
 
   const overheads = calculateControlOverheads(inputs);
   const lbResult = calculateLinkBudget(inputs);
-  const { rxSensitivityBreakdown, serviceSummary } = lbResult;
+  const { rxSensitivityBreakdown, serviceSummary, overheadSummary, antennaTiltSummary, interferenceSummary } = lbResult;
+  const is5G = inputs.technology !== '4G';
 
   const update = (partial: Partial<LinkBudgetInputs>) => {
     onChange({ ...inputs, ...partial });
@@ -141,13 +151,16 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
   };
 
   // Filter bands according to selected technology and duplex mode
-  const availableBands = TELECOM_BANDS.filter(b => {
+  const currentTechBands = TELECOM_BANDS.filter(b => {
     if (inputs.technology === '4G') {
       return b.tech === '4G' || b.tech === 'BOTH';
     } else {
       return b.tech === '5G' || b.tech === 'BOTH';
     }
-  }).filter(b => b.duplex === inputs.duplexMode);
+  });
+  const availableBands = currentTechBands.filter(b => b.duplex === inputs.duplexMode);
+  const otherDuplexMode: DuplexMode = inputs.duplexMode === 'TDD' ? 'FDD' : 'TDD';
+  const otherBands = currentTechBands.filter(b => b.duplex === otherDuplexMode);
 
   const selectedBandInfo = TELECOM_BANDS.find(b => b.band === inputs.band) || availableBands[0] || TELECOM_BANDS[0];
 
@@ -491,7 +504,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
           <Sliders className="w-3.5 h-3.5" />
           <span>3. Base Station (gNB/eNB)</span>
           <span className="hidden xl:inline text-[10px] px-1.5 py-0.5 rounded font-mono bg-slate-900 border border-slate-700/80 text-cyan-300 ml-1">
-            {inputs.bsTxPowerDbm}dBm · {inputs.mimoMode}
+            {inputs.bsTxPowerDbm}dBm · {inputs.mimoMode} · Tilt {((inputs.bsMechanicalTiltDeg ?? 2) + (inputs.bsElectricalTiltDeg ?? 4)).toFixed(1)}°
           </span>
         </button>
 
@@ -539,7 +552,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
           <Settings2 className="w-3.5 h-3.5" />
           <span>6. Advanced RF & Overheads</span>
           <span className="hidden xl:inline text-[10px] px-1.5 py-0.5 rounded font-mono bg-slate-900 border border-slate-700/80 text-cyan-300 ml-1">
-            PDCCH {overheads.avgPdcchOverheadPercent.toFixed(1)}%
+            {inputs.technology === '4G' ? `PDCCH ${overheads.avgPdcchOverheadPercent.toFixed(1)}%` : `5G OH: ${overheadSummary?.dlOverheadPercent.toFixed(0)}% DL / ${overheadSummary?.ulOverheadPercent.toFixed(0)}% UL`}
           </span>
         </button>
 
@@ -603,19 +616,33 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
 
             {/* Band selection */}
             <div>
-              <label className="block text-xs font-mono uppercase tracking-wider text-slate-400 mb-1.5">
-                3GPP Operating Band
+              <label className="block text-xs font-mono uppercase tracking-wider text-slate-400 mb-1.5 flex items-center justify-between">
+                <span>3GPP Operating Band</span>
+                <span className="text-[11px] text-cyan-400 font-normal">
+                  {selectedBandInfo.band} · {selectedBandInfo.duplex} ({selectedBandInfo.dlFreqMHz} MHz)
+                </span>
               </label>
               <select
                 value={inputs.band}
                 onChange={(e) => handleBandChange(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-100 font-mono focus:border-cyan-400 focus:outline-none"
               >
-                {availableBands.map((b) => (
-                  <option key={b.band} value={b.band}>
-                    {b.name} - {b.commonName}
-                  </option>
-                ))}
+                <optgroup label={`${inputs.duplexMode} Operating Bands (${availableBands.length})`}>
+                  {availableBands.map((b) => (
+                    <option key={b.band} value={b.band}>
+                      {b.name} - {b.commonName}
+                    </option>
+                  ))}
+                </optgroup>
+                {otherBands.length > 0 && (
+                  <optgroup label={`${otherDuplexMode} Operating Bands [Switches Duplex] (${otherBands.length})`}>
+                    {otherBands.map((b) => (
+                      <option key={b.band} value={b.band}>
+                        {b.name} - {b.commonName}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
             </div>
           </div>
@@ -1566,99 +1593,517 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
       {/* SECTION 6: ADVANCED RF, OVERHEADS & RECEIVER SENSITIVITY */}
       {activeSection === 'advanced' && (
         <div className="space-y-4">
-          {/* Physical Layer Numerology, Signaling & Beam Configuration */}
+          {/* 5G NR 3GPP Overhead & Physical Layer Configuration (TS 38.306 / TS 38.211 / TS 38.214) */}
           {inputs.technology !== '4G' ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 pt-3 border-t border-slate-800/60">
-              {/* 1. Residual BLER Target */}
-              <div>
-                <div className="flex justify-between items-center mb-1.5">
-                  <label className="text-xs font-mono uppercase tracking-wider text-slate-400">
-                    Residual BLER Target
-                  </label>
-                  <span className="text-xs font-mono font-semibold text-cyan-400">
-                    {inputs.residualBlerTargetPercent ?? 10}%
+            <div className="space-y-4 pt-1">
+              <div className="bg-slate-950/90 border border-slate-800 rounded-lg p-4 space-y-3 font-mono shadow-md">
+                {/* Header and Mode Selector Buttons */}
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded bg-cyan-950/80 border border-cyan-800/60 text-cyan-400">
+                      <Sliders className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-100 uppercase tracking-wider">
+                          5G Overhead Configuration (3GPP TS 38.306 / TS 38.211)
+                        </span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded font-bold border ${
+                          overheadSummary.frequencyRange === 'FR2'
+                            ? 'bg-purple-950/80 text-purple-300 border-purple-700/80'
+                            : 'bg-cyan-950/80 text-cyan-300 border-cyan-700/80'
+                        }`}>
+                          {overheadSummary.frequencyRange === 'FR2' ? 'FR2 mmWave (>24 GHz)' : 'FR1 Sub-6 GHz (≤7.125 GHz)'}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        Controls physical layer resource element overhead (OH) in 3GPP data rate equation: Rate ∝ (1 - OH)
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Overhead Mode Switcher: 38.306 Default vs Detailed */}
+                  <div className="flex items-center p-1 bg-slate-900 border border-slate-800 rounded-lg gap-1">
+                    <button
+                      type="button"
+                      onClick={() => update({ overheadMode: '38306_DEFAULT' })}
+                      className={`px-3 py-1.5 rounded text-xs font-semibold transition-all ${
+                        (inputs.overheadMode ?? '38306_DEFAULT') === '38306_DEFAULT'
+                          ? 'bg-cyan-900 border border-cyan-400 text-cyan-100 shadow-sm'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      Default 38.306 Values
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => update({ overheadMode: 'DETAILED' })}
+                      className={`px-3 py-1.5 rounded text-xs font-semibold transition-all ${
+                        inputs.overheadMode === 'DETAILED'
+                          ? 'bg-cyan-900 border border-cyan-400 text-cyan-100 shadow-sm'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      Detailed Mode (Components)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Mode 1: 3GPP TS 38.306 Default Overhead Mode */}
+                {(inputs.overheadMode ?? '38306_DEFAULT') === '38306_DEFAULT' ? (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {/* Downlink Overhead Card */}
+                      <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-lg space-y-1.5">
+                        <div className="flex justify-between items-center">
+                          <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
+                            DL Overhead (OH_DL)
+                          </span>
+                          <span className="text-[10px] font-bold text-cyan-400 bg-cyan-950 px-1.5 py-0.5 rounded border border-cyan-800">
+                            {overheadSummary.frequencyRange === 'FR2' ? 'FR2 Default: 0.18' : 'FR1 Default: 0.14'}
+                          </span>
+                        </div>
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-2xl font-bold text-cyan-300">
+                            {(overheadSummary.dlOverheadRatio * 100).toFixed(1)}%
+                          </span>
+                          <span className="text-xs text-slate-400">
+                            (OH = {overheadSummary.dlOverheadRatio.toFixed(2)})
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-400">
+                          {overheadSummary.frequencyRange === 'FR2'
+                            ? '3GPP standard mmWave allocation for PBCH, PDCCH, DMRS, TRS, PTRS'
+                            : '3GPP standard Sub-6GHz allocation for PBCH, PDCCH, DMRS, CSI-RS'}
+                        </p>
+                        <div className="text-[10px] text-slate-500 pt-1 border-t border-slate-800 flex justify-between">
+                          <span>PDSCH Data Multiplier:</span>
+                          <span className="text-slate-200 font-semibold">{(1 - overheadSummary.dlOverheadRatio).toFixed(2)}×</span>
+                        </div>
+                      </div>
+
+                      {/* Uplink Overhead Card */}
+                      <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-lg space-y-1.5">
+                        <div className="flex justify-between items-center">
+                          <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
+                            UL Overhead (OH_UL)
+                          </span>
+                          <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950 px-1.5 py-0.5 rounded border border-emerald-800">
+                            {overheadSummary.frequencyRange === 'FR2' ? 'FR2 Default: 0.10' : 'FR1 Default: 0.08'}
+                          </span>
+                        </div>
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-2xl font-bold text-emerald-300">
+                            {(overheadSummary.ulOverheadRatio * 100).toFixed(1)}%
+                          </span>
+                          <span className="text-xs text-slate-400">
+                            (OH = {overheadSummary.ulOverheadRatio.toFixed(2)})
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-400">
+                          {overheadSummary.frequencyRange === 'FR2'
+                            ? '3GPP standard mmWave allocation for PUSCH DMRS, PUCCH, SRS, PTRS'
+                            : '3GPP standard Sub-6GHz allocation for PUSCH DMRS, PUCCH, SRS'}
+                        </p>
+                        <div className="text-[10px] text-slate-500 pt-1 border-t border-slate-800 flex justify-between">
+                          <span>PUSCH Data Multiplier:</span>
+                          <span className="text-slate-200 font-semibold">{(1 - overheadSummary.ulOverheadRatio).toFixed(2)}×</span>
+                        </div>
+                      </div>
+
+                      {/* 3GPP Specification Reference & Switch Option */}
+                      <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-lg space-y-2 flex flex-col justify-between">
+                        <div>
+                          <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400" />
+                            <span>3GPP TS 38.306 Table 4.1.2-1</span>
+                          </span>
+                          <p className="text-[10px] text-slate-300 mt-1 leading-relaxed">
+                            Standard physical overhead constants calibrated by 3GPP to reflect close real-world DL/UL user throughput.
+                          </p>
+                        </div>
+                        <div className="pt-2 border-t border-slate-800">
+                          <button
+                            type="button"
+                            onClick={() => update({ overheadMode: 'DETAILED' })}
+                            className="w-full text-center text-[10px] py-1 px-2 rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 transition-colors"
+                          >
+                            Configure Detailed Components (SSB, CORESET, DMRS, etc.) →
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* Mode 2: Detailed Component Overhead Mode */
+                  <div className="space-y-3.5">
+                    <div className="p-2.5 bg-slate-900/60 border border-slate-800 rounded text-[11px] text-slate-300 flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-cyan-300 font-semibold flex items-center gap-1.5">
+                        <Activity className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Detailed Component Overheads (3GPP TS 38.211 / TS 38.214):</span>
+                      </span>
+                      <span className="text-slate-400">
+                        Granular RE calculations for SSB, PDCCH CORESET, DMRS, CSI-RS, TRS, PTRS
+                      </span>
+                    </div>
+
+                    {/* 6 Components Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                      {/* 1. SSB (Synchronization Signal Block) */}
+                      <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-2.5 space-y-1.5 flex flex-col justify-between">
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <label className="text-[10px] uppercase font-bold text-slate-300">1. SSB Bursts</label>
+                            <span className="text-[10px] text-cyan-400 font-bold font-mono">{overheadSummary.breakdown.ssbPercent.toFixed(2)}%</span>
+                          </div>
+                          <div className="space-y-1">
+                            <div>
+                              <span className="text-[9px] text-slate-400 block">Periodicity:</span>
+                              <select
+                                value={inputs.ssbPeriodicityMs ?? 20}
+                                onChange={(e) => update({ ssbPeriodicityMs: Number(e.target.value) })}
+                                className="w-full bg-slate-950 border border-slate-700 rounded px-1.5 py-1 text-[11px] text-slate-100 font-mono"
+                              >
+                                <option value="5">5 ms (High sync rate)</option>
+                                <option value="10">10 ms</option>
+                                <option value="20">20 ms (Default 3GPP)</option>
+                                <option value="40">40 ms</option>
+                                <option value="80">80 ms</option>
+                                <option value="160">160 ms (Low power)</option>
+                              </select>
+                            </div>
+                            <div>
+                              <span className="text-[9px] text-slate-400 block">Beams (3GPP L_max):</span>
+                              <select
+                                value={inputs.numberOfBeams ?? 1}
+                                onChange={(e) => update({ numberOfBeams: Number(e.target.value) })}
+                                className="w-full bg-slate-950 border border-slate-700 rounded px-1.5 py-1 text-[10px] text-slate-100 font-mono"
+                              >
+                                <option value="1">1 Beam - Single SSB / Quasi-Omni (L_max=4/8, ssb-PositionsInBurst)</option>
+                                <option value="2">2 Beams - 2 SSB Sweeps (Case A/B/C shortBitmap)</option>
+                                <option value="3">3 Beams - 3 SSB Sweeps (ssb-PositionsInBurst 3 beams)</option>
+                                <option value="4">4 Beams - 4 SSB Sweeps (Sub-3GHz L_max=4 max, Case A/B)</option>
+                                <option value="5">5 Beams - 5 SSB Sweeps (3-6GHz mediumBitmap 5 beams)</option>
+                                <option value="6">6 Beams - 6 SSB Sweeps (3-6GHz mediumBitmap 6 beams)</option>
+                                <option value="7">7 Beams - 7 SSB Sweeps (3-6GHz mediumBitmap 7 beams)</option>
+                                <option value="8">8 Beams - 8 SSB Sweeps (3-6GHz L_max=8 max, Case C mediumBitmap)</option>
+                                {overheadSummary.frequencyRange === 'FR2' && <option value="16">16 Beams - 16 SSB Sweeps (FR2 Case D/E longBitmap)</option>}
+                                {overheadSummary.frequencyRange === 'FR2' && <option value="32">32 Beams - 32 SSB Sweeps (FR2 Case D/E longBitmap)</option>}
+                                {overheadSummary.frequencyRange === 'FR2' && <option value="64">64 Beams - 64 SSB Sweeps (FR2 L_max=64 max, Case D/E)</option>}
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+                        <span className="text-[9px] text-slate-500 block border-t border-slate-800/60 pt-1">4 sym × 20 RBs · Impacts PDCCH</span>
+                      </div>
+
+                      {/* 2. PDCCH CORESET Symbols */}
+                      <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-2.5 space-y-1.5 flex flex-col justify-between">
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <label className="text-[10px] uppercase font-bold text-slate-300">2. PDCCH CORESET</label>
+                            <span className="text-[10px] text-cyan-400 font-bold font-mono">{overheadSummary.breakdown.pdcchPercent.toFixed(2)}%</span>
+                          </div>
+                          <div className="space-y-1">
+                            <div>
+                              <span className="text-[9px] text-slate-400 block">CORESET Duration:</span>
+                              <select
+                                value={inputs.pdcchCoresetSymbols ?? 2}
+                                onChange={(e) => update({ pdcchCoresetSymbols: Number(e.target.value) })}
+                                className="w-full bg-slate-950 border border-slate-700 rounded px-1.5 py-1 text-[11px] text-slate-100 font-mono"
+                              >
+                                <option value="1">1 Symbol (Low / -1.8% OH)</option>
+                                <option value="2">2 Symbols (Default 3GPP)</option>
+                                <option value="3">3 Symbols (High load / +2.2% OH)</option>
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+                        <span className="text-[9px] text-slate-500 block border-t border-slate-800/60 pt-1">Control search spaces · 1-3 sym</span>
+                      </div>
+
+                      {/* 3. DMRS Configuration */}
+                      <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-2.5 space-y-1.5 flex flex-col justify-between">
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <label className="text-[10px] uppercase font-bold text-slate-300">3. DMRS Config</label>
+                            <span className="text-[10px] text-cyan-400 font-bold font-mono">{overheadSummary.breakdown.dmrsDlPercent.toFixed(2)}%</span>
+                          </div>
+                          <div className="space-y-1">
+                            <div>
+                              <span className="text-[9px] text-slate-400 block">Config Type:</span>
+                              <select
+                                value={inputs.dmrsConfigType ?? 'TYPE_1'}
+                                onChange={(e) => update({ dmrsConfigType: e.target.value as DmrsConfigType })}
+                                className="w-full bg-slate-950 border border-slate-700 rounded px-1.5 py-1 text-[11px] text-slate-100 font-mono"
+                              >
+                                <option value="TYPE_1">Type 1 (6 REs/RB)</option>
+                                <option value="TYPE_2">Type 2 (4 REs/RB)</option>
+                              </select>
+                            </div>
+                            <div>
+                              <span className="text-[9px] text-slate-400 block">Symbols / Slot:</span>
+                              <select
+                                value={inputs.dmrsSymbolsPerSlot ?? 1}
+                                onChange={(e) => update({ dmrsSymbolsPerSlot: Number(e.target.value), dmrsAdditionalPositions: Math.max(0, Number(e.target.value) - 1) })}
+                                className="w-full bg-slate-950 border border-slate-700 rounded px-1.5 py-1 text-[11px] text-slate-100 font-mono"
+                              >
+                                <option value="1">1 Symbol (pos 0 - low speed)</option>
+                                <option value="2">2 Symbols (pos 1 - nominal)</option>
+                                <option value="3">3 Symbols (pos 2 - high speed)</option>
+                                <option value="4">4 Symbols (pos 3 - high Doppler)</option>
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+                        <span className="text-[9px] text-slate-500 block border-t border-slate-800/60 pt-1">Demod pilots · DL & UL impact</span>
+                      </div>
+
+                      {/* 4. CSI-RS Configuration & Multiplexing */}
+                      <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-2.5 space-y-1.5 flex flex-col justify-between">
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <div className="flex items-center gap-1">
+                              <label className="text-[10px] uppercase font-bold text-slate-300">4. CSI-RS</label>
+                              {(overheadSummary.breakdown.csiRsCdmReductionPercent ?? 0) > 0 && (
+                                <span className="text-[8px] bg-emerald-950 text-emerald-400 border border-emerald-800/80 px-1 py-0.2 rounded font-mono font-semibold">
+                                  -{overheadSummary.breakdown.csiRsCdmReductionPercent}% CDM
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-cyan-400 font-bold font-mono">{overheadSummary.breakdown.csiRsPercent.toFixed(2)}%</span>
+                          </div>
+                          <div className="space-y-1">
+                            <div className="grid grid-cols-2 gap-1">
+                              <div>
+                                <span className="text-[9px] text-slate-400 block">State:</span>
+                                <select
+                                  value={(inputs.csiRsEnabled ?? true) ? 'true' : 'false'}
+                                  onChange={(e) => update({ csiRsEnabled: e.target.value === 'true' })}
+                                  className="w-full bg-slate-950 border border-slate-700 rounded px-1 py-1 text-[10px] text-slate-100 font-mono"
+                                >
+                                  <option value="true">Active</option>
+                                  <option value="false">Off (0%)</option>
+                                </select>
+                              </div>
+                              <div>
+                                <span className="text-[9px] text-slate-400 block">Density:</span>
+                                <select
+                                  value={inputs.csiRsDensity ?? 1.0}
+                                  onChange={(e) => update({ csiRsDensity: Number(e.target.value) })}
+                                  className="w-full bg-slate-950 border border-slate-700 rounded px-1 py-1 text-[10px] text-slate-100 font-mono"
+                                >
+                                  <option value="0.5">0.5 RE/RB</option>
+                                  <option value="1">1.0 RE/RB</option>
+                                  <option value="3">3.0 RE/RB</option>
+                                </select>
+                              </div>
+                            </div>
+                            <div>
+                              <span className="text-[9px] text-slate-400 block">CDM Multiplexing:</span>
+                              <select
+                                value={inputs.csiRsMultiplexing || ((inputs.csiRsPorts ?? 4) >= 8 ? 'cdm4-FD2-TD2' : 'fd-CDM2')}
+                                onChange={(e) => update({ csiRsMultiplexing: e.target.value as CsiRsMultiplexingType })}
+                                className="w-full bg-slate-950 border border-slate-700 rounded px-1 py-1 text-[10px] text-slate-100 font-mono"
+                              >
+                                <option value="noCDM">noCDM (1 Port / 1 RE)</option>
+                                <option value="fd-CDM2">fd-CDM2 (2 Ports / Freq OCC)</option>
+                                <option value="cdm4-FD2-TD2">cdm4-FD2-TD2 (4 Ports / 2F×2T)</option>
+                                <option value="cdm8-FD2-TD4">cdm8-FD2-TD4 (8 Ports / 2F×4T)</option>
+                              </select>
+                            </div>
+                            <div className="grid grid-cols-2 gap-1">
+                              <div>
+                                <span className="text-[9px] text-slate-400 block">Ports:</span>
+                                <select
+                                  value={inputs.csiRsPorts ?? 4}
+                                  onChange={(e) => update({ csiRsPorts: Number(e.target.value) })}
+                                  className="w-full bg-slate-950 border border-slate-700 rounded px-1 py-1 text-[10px] text-slate-100 font-mono"
+                                >
+                                  <option value="1">1 Port</option>
+                                  <option value="2">2 Ports</option>
+                                  <option value="4">4 Ports</option>
+                                  <option value="8">8 Ports</option>
+                                  <option value="16">16 Ports</option>
+                                  <option value="32">32 Ports</option>
+                                </select>
+                              </div>
+                              <div>
+                                <span className="text-[9px] text-slate-400 block">Resource:</span>
+                                <select
+                                  value={inputs.csiRsResourceType || 'PERIODIC'}
+                                  onChange={(e) => update({ csiRsResourceType: e.target.value as CsiRsResourceType })}
+                                  className="w-full bg-slate-950 border border-slate-700 rounded px-1 py-1 text-[10px] text-slate-100 font-mono"
+                                >
+                                  <option value="PERIODIC">Periodic</option>
+                                  <option value="SEMI_PERSISTENT">Semi-Pers</option>
+                                  <option value="APERIODIC">Aperiodic</option>
+                                </select>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <span className="text-[9px] text-slate-500 block border-t border-slate-800/60 pt-1 truncate">TS 38.211 OCC · Drives PUCCH</span>
+                      </div>
+
+                      {/* 5. TRS (Tracking Reference Signal) */}
+                      <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-2.5 space-y-1.5">
+                        <div className="flex justify-between items-center">
+                          <label className="text-[10px] uppercase font-bold text-slate-300">5. TRS (Sync)</label>
+                          <span className="text-[10px] text-cyan-400 font-bold">{overheadSummary.breakdown.trsPercent.toFixed(2)}%</span>
+                        </div>
+                        <div className="space-y-1">
+                          <div>
+                            <span className="text-[9px] text-slate-400 block">State:</span>
+                            <select
+                              value={(inputs.trsEnabled ?? true) ? 'true' : 'false'}
+                              onChange={(e) => update({ trsEnabled: e.target.value === 'true' })}
+                              className="w-full bg-slate-950 border border-slate-700 rounded px-1.5 py-1 text-[11px] text-slate-100 font-mono"
+                            >
+                              <option value="true">Active (Enabled)</option>
+                              <option value="false">Disabled (0%)</option>
+                            </select>
+                          </div>
+                          <div>
+                            <span className="text-[9px] text-slate-400 block">Periodicity:</span>
+                            <select
+                              value={inputs.trsPeriodicityMs ?? 20}
+                              onChange={(e) => update({ trsPeriodicityMs: Number(e.target.value) })}
+                              className="w-full bg-slate-950 border border-slate-700 rounded px-1.5 py-1 text-[11px] text-slate-100 font-mono"
+                            >
+                              <option value="10">10 ms</option>
+                              <option value="20">20 ms (Default)</option>
+                              <option value="40">40 ms</option>
+                              <option value="80">80 ms</option>
+                            </select>
+                          </div>
+                        </div>
+                        <span className="text-[9px] text-slate-500 block">4 sym / 2 slots burst</span>
+                      </div>
+
+                      {/* 6. PTRS (Phase Tracking Reference Signal) */}
+                      <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-2.5 space-y-1.5">
+                        <div className="flex justify-between items-center">
+                          <label className="text-[10px] uppercase font-bold text-slate-300">6. PTRS (Phase)</label>
+                          <span className="text-[10px] text-cyan-400 font-bold">{overheadSummary.breakdown.ptrsDlPercent.toFixed(2)}%</span>
+                        </div>
+                        <div className="space-y-1">
+                          <div>
+                            <span className="text-[9px] text-slate-400 block">State:</span>
+                            <select
+                              value={(inputs.ptrsEnabled ?? (overheadSummary.frequencyRange === 'FR2')) ? 'true' : 'false'}
+                              onChange={(e) => update({ ptrsEnabled: e.target.value === 'true' })}
+                              className="w-full bg-slate-950 border border-slate-700 rounded px-1.5 py-1 text-[11px] text-slate-100 font-mono"
+                            >
+                              <option value="true">Active (mmWave/High MCS)</option>
+                              <option value="false">Disabled (0%)</option>
+                            </select>
+                          </div>
+                          <div>
+                            <span className="text-[9px] text-slate-400 block">Time Density (L_PTRS):</span>
+                            <select
+                              value={inputs.ptrsTimeDensity ?? 1}
+                              onChange={(e) => update({ ptrsTimeDensity: Number(e.target.value) })}
+                              className="w-full bg-slate-950 border border-slate-700 rounded px-1.5 py-1 text-[11px] text-slate-100 font-mono"
+                            >
+                              <option value="1">Every 1 symbol</option>
+                              <option value="2">Every 2 symbols</option>
+                              <option value="4">Every 4 symbols</option>
+                            </select>
+                          </div>
+                        </div>
+                        <span className="text-[9px] text-slate-500 block">Phase noise correction</span>
+                      </div>
+                    </div>
+
+                    {/* Detailed Aggregation Summary Bar */}
+                    <div className="p-3 bg-slate-900/90 border border-cyan-800/60 rounded-lg flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div>
+                          <span className="text-[10px] text-slate-400 block uppercase">Total DL Physical OH:</span>
+                          <span className="text-base font-bold text-cyan-300 font-mono">
+                            {overheadSummary.dlOverheadPercent.toFixed(2)}%
+                          </span>
+                          <span className="text-[10px] text-slate-500 font-mono block">
+                            (OH_DL = {overheadSummary.dlOverheadRatio.toFixed(4)})
+                          </span>
+                        </div>
+                        <div className="border-l border-slate-800 pl-3">
+                          <span className="text-[10px] text-slate-400 block uppercase">Total UL Physical OH:</span>
+                          <span className="text-base font-bold text-emerald-300 font-mono">
+                            {overheadSummary.ulOverheadPercent.toFixed(2)}%
+                          </span>
+                          <span className="text-[10px] text-slate-500 font-mono block">
+                            (OH_UL = {overheadSummary.ulOverheadRatio.toFixed(4)})
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-slate-400 font-mono bg-slate-950 border border-slate-800 px-2 py-1 rounded">
+                          PDSCH Multiplier: {(1 - overheadSummary.dlOverheadRatio).toFixed(3)}×
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => update({ overheadMode: '38306_DEFAULT' })}
+                          className="text-[10px] py-1 px-2.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors"
+                        >
+                          Reset to 38.306 Standard Defaults
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Physical Layer Numerology & Residual BLER Targets */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 gap-4">
+                {/* 1. Residual BLER Target */}
+                <div className="bg-slate-950/70 border border-slate-800 rounded-lg p-3">
+                  <div className="flex justify-between items-center mb-1.5">
+                    <label className="text-xs font-mono uppercase tracking-wider text-slate-400">
+                      Residual BLER Target
+                    </label>
+                    <span className="text-xs font-mono font-semibold text-cyan-400">
+                      {inputs.residualBlerTargetPercent ?? 10}%
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="0.1"
+                      max="50"
+                      step="0.5"
+                      value={inputs.residualBlerTargetPercent ?? 10}
+                      onChange={(e) => update({ residualBlerTargetPercent: Math.max(0.1, Number(e.target.value)) })}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-100 font-mono focus:border-cyan-400 focus:outline-none"
+                      placeholder="10"
+                    />
+                    <span className="text-xs text-slate-400 font-mono">%</span>
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-mono mt-1 block">
+                    HARQ outer-loop residual target (Default: 10%)
                   </span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min="0.1"
-                    max="50"
-                    step="0.5"
-                    value={inputs.residualBlerTargetPercent ?? 10}
-                    onChange={(e) => update({ residualBlerTargetPercent: Math.max(0.1, Number(e.target.value)) })}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-100 font-mono focus:border-cyan-400 focus:outline-none"
-                    placeholder="10"
-                  />
-                  <span className="text-xs text-slate-400 font-mono">%</span>
+
+                {/* 2. Subcarrier Spacing & Numerology Info Card */}
+                <div className="bg-slate-950/70 border border-slate-800 rounded-lg p-3 flex flex-col justify-between">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-xs font-mono uppercase tracking-wider text-slate-400">
+                      SCS Numerology & Frame
+                    </span>
+                    <span className="text-[10px] font-bold text-cyan-400 bg-cyan-950 border border-cyan-800 px-1.5 py-0.5 rounded">
+                      μ = {overheadSummary.frequencyRange === 'FR2' ? '3 (120 kHz)' : '1 (30 kHz)'}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 font-mono leading-relaxed">
+                    Slot duration: {overheadSummary.frequencyRange === 'FR2' ? '0.125 ms (8 slots/subframe)' : '0.5 ms (2 slots/subframe)'} · 14 OFDM symbols per slot.
+                  </p>
+                  <div className="text-[10px] text-slate-500 font-mono pt-1 border-t border-slate-800 flex justify-between">
+                    <span>Frame length: 10 ms</span>
+                    <span className="text-cyan-300 font-semibold">{overheadSummary.frequencyRange === 'FR2' ? '80 slots/frame' : '20 slots/frame'}</span>
+                  </div>
                 </div>
-                <span className="text-[10px] text-slate-500 font-mono mt-1 block">
-                  Outer-loop target (Default: 10%)
-                </span>
-              </div>
-
-              {/* 2. Number of PDSCH/PUSCH DMRS symbols per slot (5G NR) */}
-              <div>
-                <label className="block text-xs font-mono uppercase tracking-wider text-slate-400 mb-1.5">
-                  PDSCH/PUSCH DMRS Symbols / Slot
-                </label>
-                <select
-                  value={inputs.dmrsSymbolsPerSlot ?? 1}
-                  onChange={(e) => update({ dmrsSymbolsPerSlot: Number(e.target.value) })}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-100 font-mono focus:border-cyan-400 focus:outline-none"
-                >
-                  <option value="1">1 Symbol (Single-symbol DMRS, Type 1)</option>
-                  <option value="2">2 Symbols (Additional DMRS pos 1)</option>
-                  <option value="3">3 Symbols (Double-symbol DMRS pos 2)</option>
-                </select>
-                <span className="text-[10px] text-slate-500 font-mono mt-1 block">
-                  5G Pilots overhead per 14-symbol slot (Default: 1)
-                </span>
-              </div>
-
-              {/* 3. Number of beams (5G NR) */}
-              <div>
-                <label className="block text-xs font-mono uppercase tracking-wider text-slate-400 mb-1.5">
-                  Number of Beams
-                </label>
-                <select
-                  value={inputs.numberOfBeams ?? 1}
-                  onChange={(e) => update({ numberOfBeams: Number(e.target.value) })}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-100 font-mono focus:border-cyan-400 focus:outline-none"
-                >
-                  <option value="1">1 Beam (Sector / Omni)</option>
-                  <option value="2">2 Beams (Dual-beam splitting)</option>
-                  <option value="3">3 Beams (Tri-beam pattern)</option>
-                  <option value="4">4 Beams (4-Beam SS-PBCH Grid)</option>
-                  <option value="5">5 Beams (5-Beam Grid)</option>
-                  <option value="6">6 Beams (6-Beam Sweeping)</option>
-                  <option value="7">7 Beams (7-Beam Sweeping)</option>
-                  <option value="8">8 Beams (8-Beam 3GPP Sub-6 GHz Max)</option>
-                </select>
-                <span className="text-[10px] text-slate-500 font-mono mt-1 block">
-                  5G SSB / CSI-RS sweeping beams (Default: 1)
-                </span>
-              </div>
-
-              {/* 4. SSB periodicity [ms] (5G NR) */}
-              <div>
-                <label className="block text-xs font-mono uppercase tracking-wider text-slate-400 mb-1.5">
-                  SSB Periodicity [ms]
-                </label>
-                <select
-                  value={inputs.ssbPeriodicityMs ?? 20}
-                  onChange={(e) => update({ ssbPeriodicityMs: Number(e.target.value) })}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-100 font-mono focus:border-cyan-400 focus:outline-none"
-                >
-                  <option value="10">10 ms (High-density rapid discovery)</option>
-                  <option value="20">20 ms (Default 3GPP Standalone)</option>
-                  <option value="40">40 ms (Energy-saving low overhead)</option>
-                  <option value="80">80 ms (Deep power conservation)</option>
-                  <option value="160">160 ms (Maximum 3GPP allowed)</option>
-                </select>
-                <span className="text-[10px] text-slate-500 font-mono mt-1 block">
-                  5G SS-PBCH burst cycle (Default: 20 ms)
-                </span>
               </div>
             </div>
           ) : (
@@ -1882,11 +2327,19 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                       Beams: {inputs.numberOfBeams ?? 1}
                     </span>
                     <span className="bg-slate-900/80 border border-slate-800 px-1.5 py-0.5 rounded text-slate-300">
-                      CA: {inputs.caEnabled ? (inputs.caCarriersCount || 1) : 1}CC
+                      CORESET: {inputs.pdcchCoresetSymbols ?? 2}sym
                     </span>
                     <span className="bg-slate-900/80 border border-slate-800 px-1.5 py-0.5 rounded text-slate-300">
                       DMRS: {inputs.dmrsSymbolsPerSlot ?? 1}sym
                     </span>
+                    <span className="bg-slate-900/80 border border-slate-800 px-1.5 py-0.5 rounded text-slate-300">
+                      CA: {inputs.caEnabled ? (inputs.caCarriersCount || 1) : 1}CC
+                    </span>
+                    {inputs.csiRsResourceType === 'APERIODIC' && (
+                      <span className="bg-slate-900/80 border border-cyan-800/80 px-1.5 py-0.5 rounded text-cyan-300">
+                        Aperiodic DCI Trigger
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -1957,7 +2410,13 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                       Period: {inputs.csiRsCaPeriodicitySlots ?? 20} slots
                     </span>
                     <span className="bg-slate-900/80 border border-slate-800 px-1.5 py-0.5 rounded text-slate-300">
+                      Ports: {inputs.csiRsPorts ?? 4}P ({inputs.csiRsMultiplexing || 'fd-CDM2'})
+                    </span>
+                    <span className="bg-slate-900/80 border border-slate-800 px-1.5 py-0.5 rounded text-slate-300">
                       CA: {inputs.caEnabled ? (inputs.caCarriersCount || 1) : 1}CC
+                    </span>
+                    <span className="bg-slate-900/80 border border-slate-800 px-1.5 py-0.5 rounded text-slate-300">
+                      BLER: {inputs.residualBlerTargetPercent ?? 10}%
                     </span>
                   </div>
                 </div>
@@ -2716,6 +3175,272 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
               </div>
             </div>
           </div>
+
+          {/* Antenna Mechanical & Electrical Tilts (3GPP TR 38.901 §7.3 / 36.814) */}
+          <div className="pt-4 border-t border-slate-800/80 space-y-3.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Compass className="w-4 h-4 text-cyan-400" />
+                <span className="text-xs font-mono font-semibold uppercase tracking-wider text-slate-200">
+                  Antenna Mechanical & Electrical Tilts
+                </span>
+                <span className="text-[10px] bg-cyan-950/80 border border-cyan-800/60 text-cyan-300 font-mono px-2 py-0.5 rounded-full">
+                  3GPP TR 38.901 §7.3 / AISG RET
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-xs font-mono">
+                <span className="text-slate-400">Total Downtilt:</span>
+                <span className="font-bold text-cyan-300 bg-cyan-950 border border-cyan-800/80 px-2 py-0.5 rounded shadow-xs">
+                  θ_total = {((inputs.bsMechanicalTiltDeg ?? 2.0) + (inputs.bsElectricalTiltDeg ?? 4.0)).toFixed(1)}°
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* 1. Mechanical Downtilt */}
+              <div className="bg-slate-950/70 border border-slate-800 rounded-lg p-3 flex flex-col justify-between">
+                <div>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <label className="text-xs font-mono uppercase tracking-wider text-slate-300 font-semibold">
+                      Mechanical Downtilt (θ_mech)
+                    </label>
+                    <span className="text-xs font-mono font-bold text-cyan-400">
+                      {(inputs.bsMechanicalTiltDeg ?? 2.0).toFixed(1)}°
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 font-mono mb-2">
+                    Bracket physical mounting angle (-2° to +15°)
+                  </p>
+                  <div className="flex items-center gap-2 mb-2">
+                    <input
+                      type="range"
+                      min="-2"
+                      max="15"
+                      step="0.5"
+                      value={inputs.bsMechanicalTiltDeg ?? 2.0}
+                      onChange={(e) => update({ bsMechanicalTiltDeg: Number(e.target.value) })}
+                      className="w-full accent-cyan-400 cursor-pointer"
+                    />
+                    <input
+                      type="number"
+                      min="-2"
+                      max="15"
+                      step="0.5"
+                      value={inputs.bsMechanicalTiltDeg ?? 2.0}
+                      onChange={(e) => update({ bsMechanicalTiltDeg: Number(e.target.value) })}
+                      className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-100 font-mono text-center focus:border-cyan-400 focus:outline-none"
+                    />
+                    <span className="text-xs text-slate-400 font-mono">°</span>
+                  </div>
+                  {/* Preset quick buttons */}
+                  <div className="flex flex-wrap gap-1 text-[9px] font-mono">
+                    {[-2, 0, 2, 4, 8].map((deg) => (
+                      <button
+                        key={deg}
+                        type="button"
+                        onClick={() => update({ bsMechanicalTiltDeg: deg })}
+                        className={`px-1.5 py-0.5 rounded border transition-colors cursor-pointer ${
+                          (inputs.bsMechanicalTiltDeg ?? 2.0) === deg
+                            ? 'bg-cyan-950 border-cyan-500 text-cyan-300 font-bold'
+                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {deg > 0 ? `+${deg}°` : `${deg}°`} {deg === -2 ? '(Uptilt)' : deg === 0 ? '(Flat)' : deg === 2 ? '(Macro)' : deg === 4 ? '(Urban)' : '(Mast)'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <span className="text-[9px] text-slate-500 font-mono pt-2 border-t border-slate-900 mt-2 block">
+                  Tilts physical array & all side lobes simultaneously.
+                </span>
+              </div>
+
+              {/* 2. Electrical Downtilt (RET) */}
+              <div className="bg-slate-950/70 border border-slate-800 rounded-lg p-3 flex flex-col justify-between">
+                <div>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <label className="text-xs font-mono uppercase tracking-wider text-slate-300 font-semibold">
+                      Electrical Tilt (RET θ_elec)
+                    </label>
+                    <span className="text-xs font-mono font-bold text-emerald-400">
+                      {(inputs.bsElectricalTiltDeg ?? 4.0).toFixed(1)}°
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 font-mono mb-2">
+                    Phase-shifted Remote Electrical Tilt (0° to +14°)
+                  </p>
+                  <div className="flex items-center gap-2 mb-2">
+                    <input
+                      type="range"
+                      min="0"
+                      max="14"
+                      step="0.5"
+                      value={inputs.bsElectricalTiltDeg ?? 4.0}
+                      onChange={(e) => update({ bsElectricalTiltDeg: Number(e.target.value) })}
+                      className="w-full accent-emerald-400 cursor-pointer"
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      max="14"
+                      step="0.5"
+                      value={inputs.bsElectricalTiltDeg ?? 4.0}
+                      onChange={(e) => update({ bsElectricalTiltDeg: Number(e.target.value) })}
+                      className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-100 font-mono text-center focus:border-emerald-400 focus:outline-none"
+                    />
+                    <span className="text-xs text-slate-400 font-mono">°</span>
+                  </div>
+                  {/* Preset quick buttons */}
+                  <div className="flex flex-wrap gap-1 text-[9px] font-mono">
+                    {[0, 2, 4, 6, 10].map((deg) => (
+                      <button
+                        key={deg}
+                        type="button"
+                        onClick={() => update({ bsElectricalTiltDeg: deg })}
+                        className={`px-1.5 py-0.5 rounded border transition-colors cursor-pointer ${
+                          (inputs.bsElectricalTiltDeg ?? 4.0) === deg
+                            ? 'bg-emerald-950 border-emerald-500 text-emerald-300 font-bold'
+                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {deg}° {deg === 0 ? '(0° RET)' : deg === 2 ? '(Rural)' : deg === 4 ? '(Urban)' : deg === 6 ? '(Dense)' : '(Micro)'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <span className="text-[9px] text-slate-500 font-mono pt-2 border-t border-slate-900 mt-2 block">
+                  Preserves horizontal pattern symmetry with ≥20dB upper sidelobe suppression.
+                </span>
+              </div>
+
+              {/* 3. Vertical Beamwidth (3dB HPBW) */}
+              <div className="bg-slate-950/70 border border-slate-800 rounded-lg p-3 flex flex-col justify-between">
+                <div>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <label className="text-xs font-mono uppercase tracking-wider text-slate-300 font-semibold">
+                      Vertical 3dB Beamwidth (θ_3dB)
+                    </label>
+                    <span className="text-xs font-mono font-bold text-cyan-400">
+                      {(inputs.bsVerticalBeamwidthDeg ?? 7.0).toFixed(1)}°
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 font-mono mb-2">
+                    Elevation Half-Power Beamwidth (HPBW)
+                  </p>
+                  <select
+                    value={inputs.bsVerticalBeamwidthDeg ?? 7.0}
+                    onChange={(e) => update({ bsVerticalBeamwidthDeg: Number(e.target.value) })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-100 font-mono focus:border-cyan-400 focus:outline-none mb-2"
+                  >
+                    <option value="5">5.0° (High-Gain 64TR Massive MIMO)</option>
+                    <option value="6.5">6.5° (Standard Macro Array)</option>
+                    <option value="7">7.0° (Default 3GPP Macro Specification)</option>
+                    <option value="8.5">8.5° (Mid-Band Sector Antenna)</option>
+                    <option value="10">10.0° (Low-Band / Compact Antenna)</option>
+                    <option value="12">12.0° (Micro / Small Cell Wide Beam)</option>
+                  </select>
+                </div>
+                <div className="text-[10px] text-slate-500 font-mono pt-2 border-t border-slate-900 flex justify-between">
+                  <span>Elevation Envelope:</span>
+                  <span className="text-slate-300 font-semibold">±{((inputs.bsVerticalBeamwidthDeg ?? 7.0) / 2).toFixed(1)}° to 3dB roll-off</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 4. Coverage Geometry & 3D Radiation Pattern Insight Card */}
+            <div className="bg-slate-900/90 border border-cyan-800/60 rounded-xl p-3.5 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                <div className="flex items-center gap-2">
+                  <div className="p-1 rounded bg-cyan-950 text-cyan-400 border border-cyan-800">
+                    <Activity className="w-3.5 h-3.5" />
+                  </div>
+                  <span className="text-xs font-mono font-semibold text-slate-200">
+                    Tilt Coverage Geometry & 3D Vertical Pattern Footprint
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => update({
+                      bsElectricalTiltDeg: Math.max(0, Math.min(14, Number((antennaTiltSummary.optimalTiltDeg - (inputs.bsMechanicalTiltDeg ?? 2.0)).toFixed(1))))
+                    })}
+                    className="text-[10px] font-mono py-1 px-2.5 rounded bg-cyan-950 hover:bg-cyan-900 border border-cyan-600/80 text-cyan-300 transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Sparkles className="w-3 h-3 text-cyan-400" />
+                    <span>Apply Optimal Tilt ({antennaTiltSummary.optimalTiltDeg}°)</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
+                {/* Metric 1: Main Beam Ground Intercept */}
+                <div className="bg-slate-950/70 border border-slate-800/80 rounded-lg p-2.5">
+                  <span className="text-[10px] text-slate-400 block uppercase">Main Beam Intercept:</span>
+                  <div className="text-base font-bold text-cyan-300 mt-0.5">
+                    {antennaTiltSummary.mainBeamGroundDistanceMeters} m
+                  </div>
+                  <span className="text-[9px] text-slate-500 block mt-0.5">
+                    Boresight on ground d_center
+                  </span>
+                </div>
+
+                {/* Metric 2: 3dB Coverage Footprint */}
+                <div className="bg-slate-950/70 border border-slate-800/80 rounded-lg p-2.5">
+                  <span className="text-[10px] text-slate-400 block uppercase">3dB Ground Footprint:</span>
+                  <div className="text-base font-bold text-emerald-300 mt-0.5">
+                    {antennaTiltSummary.innerCoverageDistanceMeters}m – {antennaTiltSummary.outerCoverageDistanceMeters}m
+                  </div>
+                  <span className="text-[9px] text-slate-500 block mt-0.5">
+                    Half-power beam span
+                  </span>
+                </div>
+
+                {/* Metric 3: Cell Edge Pattern Loss */}
+                <div className="bg-slate-950/70 border border-slate-800/80 rounded-lg p-2.5">
+                  <span className="text-[10px] text-slate-400 block uppercase">Cell-Edge Pattern Loss:</span>
+                  <div className={`text-base font-bold mt-0.5 ${
+                    antennaTiltSummary.cellEdgePatternLossDb > 6
+                      ? 'text-amber-400'
+                      : antennaTiltSummary.cellEdgePatternLossDb < 0.5
+                      ? 'text-cyan-300'
+                      : 'text-emerald-300'
+                  }`}>
+                    -{antennaTiltSummary.cellEdgePatternLossDb} dB
+                  </div>
+                  <span className="text-[9px] text-slate-500 block mt-0.5">
+                    At R_max = {lbResult.maxCellRangeKm.toFixed(2)} km
+                  </span>
+                </div>
+
+                {/* Metric 4: Theoretical Optimal Tilt */}
+                <div className="bg-slate-950/70 border border-slate-800/80 rounded-lg p-2.5">
+                  <span className="text-[10px] text-slate-400 block uppercase">Recommended Tilt:</span>
+                  <div className="text-base font-bold text-cyan-300 mt-0.5">
+                    {antennaTiltSummary.optimalTiltDeg}°
+                  </div>
+                  <span className="text-[9px] text-slate-500 block mt-0.5">
+                    θ_opt = arctan(Δh/R) + θ_3dB/2
+                  </span>
+                </div>
+              </div>
+
+              <div className="text-[10px] text-slate-400 font-mono bg-slate-950/50 border border-slate-800 rounded px-2.5 py-1.5 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+                  <span>
+                    Mechanical Tilt: <strong className="text-slate-200">{(inputs.bsMechanicalTiltDeg ?? 2.0).toFixed(1)}°</strong> + Electrical RET: <strong className="text-slate-200">{(inputs.bsElectricalTiltDeg ?? 4.0).toFixed(1)}°</strong> = Effective: <strong className="text-cyan-300">{((inputs.bsMechanicalTiltDeg ?? 2.0) + (inputs.bsElectricalTiltDeg ?? 4.0)).toFixed(1)}°</strong>
+                  </span>
+                </div>
+                <span className="text-slate-500">
+                  {antennaTiltSummary.cellEdgePatternLossDb > 6
+                    ? '⚠️ High downtilt: Main beam lands close to tower; cell edge experiences antenna pattern roll-off.'
+                    : antennaTiltSummary.cellEdgePatternLossDb < 0.8
+                    ? '✅ Shallow downtilt: Maximum cell radius coverage; watch for adjacent cell interference.'
+                    : '✅ Optimal coverage illumination: Balanced cell-edge SNR with reduced inter-cell interference.'}
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -3056,10 +3781,104 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                 <option value="OUTDOOR_NLOS">Pure Outdoor NLOS (Clutter Shadowing)</option>
                 <option value="IN_VEHICLE">In-Vehicle Penetration (~8-10 dB)</option>
                 <option value="INDOOR_STANDARD">Indoor Standard Glass/Plaster (~12-16 dB)</option>
+                <option value="TUNNEL_COVERAGE">Inside Tunnel Coverage (~18-24 dB)</option>
                 <option value="INDOOR_DEEP">Deep Indoor / Low-E Glass & Concrete (~22-28 dB)</option>
               </select>
             </div>
           </div>
+
+          {/* Inside Tunnel Coverage Modeling Deep-Dive Callout */}
+          {inputs.indoorOutdoorScenario === 'TUNNEL_COVERAGE' && (() => {
+            const currentFreq = selectedBandInfo?.dlFreqMHz || 2100;
+            const tunnelPenetration = getBuildingPenetrationLoss('TUNNEL_COVERAGE', currentFreq);
+            return (
+              <div className="p-4 bg-slate-950/90 border border-cyan-800/80 rounded-lg space-y-3 font-mono shadow-md">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+                  <div className="flex items-center gap-2 text-cyan-300 font-semibold text-xs">
+                    <Activity className="w-4 h-4 text-cyan-400" />
+                    <span>3GPP & INDUSTRY TUNNEL PROPAGATION MODELING (TR 38.901 HST & ITU-R)</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-slate-400">Portal / Aperture Coupling Loss:</span>
+                    <span className="text-xs font-bold text-cyan-300 bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-700">
+                      +{tunnelPenetration.toFixed(2)} dB
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-[11px]">
+                  {/* Waveguide & Attenuation */}
+                  <div className="p-2.5 bg-slate-900/80 rounded border border-slate-800 space-y-1">
+                    <div className="text-cyan-400 font-bold flex items-center gap-1">
+                      <span>1. Waveguide Mode Attenuation</span>
+                    </div>
+                    <p className="text-slate-300 leading-relaxed text-[10px]">
+                      At cellular frequencies ({currentFreq} MHz), straight tunnels act as oversized dielectric waveguides. Near-zone features multimode interference; far-zone exhibits low longitudinal attenuation (α ≈ 0.015 - 0.04 dB/m / 15-40 dB/km).
+                    </p>
+                  </div>
+
+                  {/* Shadow Fading & Presets */}
+                  <div className="p-2.5 bg-slate-900/80 rounded border border-slate-800 space-y-1.5">
+                    <div className="text-cyan-400 font-bold flex items-center justify-between">
+                      <span>2. Shadow Fading (Slow Fading)</span>
+                      <span className="text-[10px] text-slate-400">σ: 5.5 dB vs 3.0 dB</span>
+                    </div>
+                    <p className="text-slate-300 leading-relaxed text-[10px]">
+                      Confined concrete/rock walls eliminate external clutter scatter. 3GPP HST standard models vehicular blockage with σ = 5.5 dB, or σ = 3.0 dB with Leaky Coaxial Feeder.
+                    </p>
+                    <div className="flex items-center gap-1.5 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const margin = calculateShadowFadingMargin(5.5, inputs.coverageProbability);
+                          update({
+                            shadowFadingStdDevDb: 5.5,
+                            shadowFadingMarginDb: margin,
+                            shadowFadingEnvironment: 'TUNNEL'
+                          });
+                        }}
+                        className={`text-[9px] px-2 py-1 rounded border transition-all ${
+                          Math.abs(inputs.shadowFadingStdDevDb - 5.5) < 0.2
+                            ? 'bg-cyan-900 border-cyan-400 text-cyan-200'
+                            : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-cyan-600'
+                        }`}
+                      >
+                        Apply σ = 5.5 dB (HST)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const margin = calculateShadowFadingMargin(3.0, inputs.coverageProbability);
+                          update({
+                            shadowFadingStdDevDb: 3.0,
+                            shadowFadingMarginDb: margin,
+                            shadowFadingEnvironment: 'CUSTOM'
+                          });
+                        }}
+                        className={`text-[9px] px-2 py-1 rounded border transition-all ${
+                          Math.abs(inputs.shadowFadingStdDevDb - 3.0) < 0.2
+                            ? 'bg-cyan-900 border-cyan-400 text-cyan-200'
+                            : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-cyan-600'
+                        }`}
+                      >
+                        Apply σ = 3.0 dB (Leaky DAS)
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Fast Fading & Leaky Feeder */}
+                  <div className="p-2.5 bg-slate-900/80 rounded border border-slate-800 space-y-1">
+                    <div className="text-cyan-400 font-bold">
+                      <span>3. Fast Fading & Small-Scale Physics</span>
+                    </div>
+                    <p className="text-slate-300 leading-relaxed text-[10px]">
+                      Rician fading dominates LOS & leaky feeder (K ≈ 8-12 dB). Degrades to Rayleigh around curves or vehicle shadowing. In high-speed rail (HST), Doppler shift reaches ±1 kHz at 3.5 GHz.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Log-Normal Shadow Fading & Margins Panel */}
           {(() => {
@@ -3070,6 +3889,13 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
             const currentZ = getGaussianZ(inputs.coverageProbability);
 
             const envPresets = [
+              {
+                id: 'TUNNEL' as const,
+                name: 'Inside Tunnel',
+                sigma: 5.5,
+                desc: 'Confined waveguide, train/vehicular blockage (3GPP HST)',
+                clutter: 'URBAN' as EnvironmentClutter
+              },
               {
                 id: 'RURAL' as const,
                 name: 'Rural / Farmland',
@@ -3101,6 +3927,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
             ];
 
             const activeEnv = inputs.shadowFadingEnvironment ?? (
+              Math.abs(inputs.shadowFadingStdDevDb - 5.5) < 0.2 ? 'TUNNEL' :
               Math.abs(inputs.shadowFadingStdDevDb - 6.0) < 0.2 ? 'RURAL' :
               Math.abs(inputs.shadowFadingStdDevDb - 7.0) < 0.2 ? 'SUBURBAN' :
               Math.abs(inputs.shadowFadingStdDevDb - 8.5) < 0.2 ? 'URBAN' :
@@ -3144,7 +3971,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                       Target P_cov: {inputs.coverageProbability}%
                     </span>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
                     {envPresets.map((env) => {
                       const envMargin = calculateShadowFadingMargin(env.sigma, inputs.coverageProbability);
                       const isSelected = activeEnv === env.id && Math.abs(inputs.shadowFadingStdDevDb - env.sigma) < 0.15;
@@ -3190,7 +4017,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                 </div>
 
                 {/* Primary Input Fields Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pt-1">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
                   {/* 1. Dedicated 'Shadow Fading Margin (dB)' Input Field (Requested by User) */}
                   <div className="bg-slate-900/90 border-2 border-cyan-700/60 rounded-lg p-3 flex flex-col justify-between relative overflow-hidden group shadow-md">
                     <div className="absolute top-0 right-0 w-20 h-20 bg-cyan-500/10 rounded-full blur-xl pointer-events-none" />
@@ -3347,36 +4174,427 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                     </div>
                   </div>
 
-                  {/* 4. Interference & IoT Margin */}
-                  <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex flex-col justify-between">
-                    <div>
-                      <div className="flex justify-between items-center mb-1">
-                        <label className="text-xs font-mono uppercase tracking-wider text-slate-300 font-semibold">
-                          Interference Margin (DL / UL)
-                        </label>
-                        <span className="text-xs font-mono font-bold text-slate-200">
-                          {inputs.interferenceMarginDb} / {inputs.iotMarginDb} dB
+                  {/* 4. Interference & IoT Margin (3GPP TR 36.942 / TR 38.901 / ITU-R M.2412) */}
+                  <div className="md:col-span-3 bg-slate-900/70 border border-slate-800 rounded-lg p-4 space-y-4 shadow-md">
+                    {/* Header with Title, Tech Badge & Live Values */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-800/80">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse" />
+                          <h4 className="text-xs font-mono uppercase tracking-wider text-slate-200 font-bold flex items-center gap-1.5">
+                            Interference & Cell Loading Engine (3GPP Ref)
+                          </h4>
+                          <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-semibold border ${
+                            is5G
+                              ? 'bg-cyan-950/80 border-cyan-800 text-cyan-300'
+                              : 'bg-amber-950/80 border-amber-800 text-amber-300'
+                          }`}>
+                            {is5G ? '5G NR · Lean Carrier (0% CRS) + Beamforming Spatial Filtering' : '4G LTE · Continuous CRS Floor (14.3%) + SC-FDMA UL (f=0.55)'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 font-mono mt-0.5">
+                          Hexagonal multi-tier co-channel interference & intra-cell loading effects impacting DL & UL MAPL
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 bg-slate-950/80 border border-slate-800 px-2.5 py-1.5 rounded-md">
+                        <span className="text-[10px] text-slate-400 font-mono uppercase">Effective Margins:</span>
+                        <span className="text-xs font-mono font-bold text-cyan-300">
+                          DL {interferenceSummary.effectiveDlInterferenceMarginDb.toFixed(1)} dB
+                        </span>
+                        <span className="text-slate-600">/</span>
+                        <span className="text-xs font-mono font-bold text-emerald-400">
+                          UL IoT {interferenceSummary.effectiveUlIotMarginDb.toFixed(1)} dB
                         </span>
                       </div>
-                      <p className="text-[10px] text-slate-500 font-mono mb-2">
-                        Downlink inter-cell load & Uplink IoT
-                      </p>
                     </div>
 
-                    <div className="space-y-1.5">
-                      <input
-                        type="range"
-                        min="0"
-                        max="6"
-                        step="0.5"
-                        value={inputs.interferenceMarginDb}
-                        onChange={(e) => update({ interferenceMarginDb: Number(e.target.value) })}
-                        className="w-full accent-cyan-400 cursor-pointer"
-                      />
-                      <div className="flex justify-between text-[10px] text-slate-500 font-mono">
-                        <span>0 dB (Clean)</span>
-                        <span>3 dB (Typical)</span>
-                        <span>5 dB (Heavy)</span>
+                    {/* Top Row: Scenario Dropdown, Hexagonal Tiers, ISD (Editable & Sync), Method Dropdown */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs font-mono">
+                      {/* Control 1: Interference Scenario (Pull Down Menu) */}
+                      <div className="bg-slate-950/60 border border-slate-800/80 p-2.5 rounded-lg space-y-1.5">
+                        <label className="text-[10px] text-slate-400 font-semibold uppercase block">
+                          1. Interference from Neighboring Cells
+                        </label>
+                        <select
+                          value={inputs.interferenceScenario ?? 'NEIGHBORING_CELLS'}
+                          onChange={(e) => {
+                            const sc = e.target.value as InterferenceScenarioType;
+                            update({
+                              interferenceScenario: sc,
+                              interferenceMarginDb: sc === 'ISOLATED_CELL' ? 0.0 : interferenceSummary.effectiveDlInterferenceMarginDb,
+                              iotMarginDb: sc === 'ISOLATED_CELL' ? 0.0 : interferenceSummary.effectiveUlIotMarginDb
+                            });
+                          }}
+                          className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-100 font-mono focus:border-cyan-400 focus:outline-none cursor-pointer"
+                        >
+                          <option value="NEIGHBORING_CELLS">Yes — Neighboring interferers (Networked Grid)</option>
+                          <option value="ISOLATED_CELL">No — Isolated (Single Cell / Clean RF)</option>
+                        </select>
+                        <span className="text-[10px] text-slate-500 block">
+                          {inputs.interferenceScenario === 'ISOLATED_CELL'
+                            ? 'Isolated single cell: 0 dB inter-cell interference'
+                            : 'Hexagonal multi-site cluster interference active'}
+                        </span>
+                      </div>
+
+                      {/* Control 2: Hexagonal Layout & Tiers */}
+                      <div className={`bg-slate-950/60 border border-slate-800/80 p-2.5 rounded-lg space-y-1.5 ${
+                        inputs.interferenceScenario === 'ISOLATED_CELL' ? 'opacity-40 pointer-events-none' : ''
+                      }`}>
+                        <label className="text-[10px] text-slate-400 font-semibold uppercase block">
+                          2. Hexagonal Multi-Tier Layout
+                        </label>
+                        <select
+                          value={inputs.interferenceHexTiers ?? 1}
+                          onChange={(e) => update({ interferenceHexTiers: Number(e.target.value) as InterferenceHexLayoutTiers })}
+                          className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-100 font-mono focus:border-cyan-400 focus:outline-none cursor-pointer"
+                        >
+                          <option value={1}>1 Tier (7 sites · 18 neighbor sectors)</option>
+                          <option value={2}>2 Tiers (19 sites · 54 neighbor sectors)</option>
+                        </select>
+                        <span className="text-[10px] text-slate-500 block">
+                          {inputs.interferenceHexTiers === 2
+                            ? '19 sites (1 serving + 18 neighbors = 54 co-channel sectors)'
+                            : '7 sites (1 serving + 6 neighbors = 18 co-channel sectors)'}
+                        </span>
+                      </div>
+
+                      {/* Control 3: Inter-Site Distance (ISD) - Editable with sync */}
+                      <div className={`bg-slate-950/60 border border-slate-800/80 p-2.5 rounded-lg space-y-1.5 ${
+                        inputs.interferenceScenario === 'ISOLATED_CELL' ? 'opacity-40 pointer-events-none' : ''
+                      }`}>
+                        <div className="flex justify-between items-center">
+                          <label className="text-[10px] text-slate-400 font-semibold uppercase block">
+                            3. Inter-Site Distance (ISD)
+                          </label>
+                          <span className="text-[10px] text-cyan-400 font-bold">
+                            {(interferenceSummary.isdMeters / 1000).toFixed(2)} km
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="number"
+                            min="100"
+                            max="50000"
+                            step="50"
+                            value={inputs.interferenceIsdMeters ?? Math.round(1.5 * (lbResult.maxCellRangeMeters || 1000))}
+                            onChange={(e) => update({ interferenceIsdMeters: Math.max(50, Number(e.target.value)) })}
+                            className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-100 font-mono focus:border-cyan-400 focus:outline-none"
+                            placeholder="m"
+                          />
+                          <span className="text-[10px] text-slate-400 font-mono">m</span>
+                        </div>
+                        <div className="flex items-center justify-between text-[10px]">
+                          <span className="text-slate-500 font-mono">
+                            Ratio: {(interferenceSummary.isdMeters / Math.max(1, lbResult.maxCellRangeMeters)).toFixed(2)} × R_max
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const synced = Math.round(1.5 * Math.max(100, lbResult.maxCellRangeMeters));
+                              update({ interferenceIsdMeters: synced, interferenceIsdMultiplier: 1.5 });
+                            }}
+                            className="text-[10px] text-cyan-400 hover:text-cyan-300 font-mono underline hover:no-underline cursor-pointer"
+                            title="Reset ISD to exactly 1.5 x calculated cell range"
+                          >
+                            Set 1.5 × R
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Control 4: Interference Margin Method (3GPP Ref / Industry Best Practice) */}
+                      <div className={`bg-slate-950/60 border border-slate-800/80 p-2.5 rounded-lg space-y-1.5 ${
+                        inputs.interferenceScenario === 'ISOLATED_CELL' ? 'opacity-40 pointer-events-none' : ''
+                      }`}>
+                        <label className="text-[10px] text-slate-400 font-semibold uppercase block">
+                          4. Interference Margin Method
+                        </label>
+                        <select
+                          value={inputs.interferenceMethod ?? 'VENDOR_LOAD_COUPLING'}
+                          onChange={(e) => update({ interferenceMethod: e.target.value as InterferenceMarginMethod })}
+                          className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-100 font-mono focus:border-cyan-400 focus:outline-none cursor-pointer"
+                        >
+                          <option value="VENDOR_LOAD_COUPLING">Vendor Load-Coupling (Ericsson/Nokia/Huawei)</option>
+                          <option value="3GPP_GEOMETRY_MULTITIER">3GPP TR 36.942 / TR 38.901 Hex Geometry</option>
+                          <option value="ITU_R_INR_SCALING">ITU-R M.2412 Interference/Thermal (INR)</option>
+                          <option value="SINR_DESENSITIZATION">3GPP Receiver Effective Desensitization</option>
+                        </select>
+                        <span className="text-[10px] text-slate-500 block truncate" title={interferenceSummary.methodName}>
+                          {interferenceSummary.methodName}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Middle Row: Cell Loading Controls (Neighbor DL Load & Intra-Cell Current Load) */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs font-mono">
+                      {/* Control 5: Average Neighboring Cells Load [%] */}
+                      <div className={`bg-slate-950/60 border border-slate-800/80 p-3 rounded-lg space-y-2 ${
+                        inputs.interferenceScenario === 'ISOLATED_CELL' ? 'opacity-40 pointer-events-none' : ''
+                      }`}>
+                        <div className="flex justify-between items-center">
+                          <label className="text-[11px] text-slate-300 font-semibold uppercase">
+                            Average Neighboring Cells Load Factor (η_neigh)
+                          </label>
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              step="5"
+                              value={inputs.neighborCellLoadPercent ?? 50}
+                              onChange={(e) => update({ neighborCellLoadPercent: Math.min(100, Math.max(0, Number(e.target.value))) })}
+                              className="w-14 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-xs text-cyan-300 font-bold font-mono text-right focus:border-cyan-400 focus:outline-none"
+                            />
+                            <span className="text-cyan-400 font-bold">%</span>
+                          </div>
+                        </div>
+
+                        <input
+                          type="range"
+                          min="0"
+                          max="100"
+                          step="1"
+                          value={inputs.neighborCellLoadPercent ?? 50}
+                          onChange={(e) => update({ neighborCellLoadPercent: Number(e.target.value) })}
+                          className="w-full accent-cyan-400 cursor-pointer"
+                        />
+
+                        <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+                          <span>0% (Empty)</span>
+                          <span>30% (Light)</span>
+                          <span>50% (Nominal)</span>
+                          <span>70% (Busy)</span>
+                          <span>100% (Full Buffer)</span>
+                        </div>
+
+                        {/* Technology-specific load notes */}
+                        <div className="bg-slate-900/90 border border-slate-800 p-2 rounded text-[10px] text-slate-400 space-y-1">
+                          {is5G ? (
+                            <div className="text-cyan-300/90">
+                              <strong>5G NR Lean Carrier:</strong> 0% continuous CRS. At {inputs.neighborCellLoadPercent ?? 50}% load, effective DL interference load is <strong>{interferenceSummary.effectiveDlTrafficLoadPercent}%</strong> (traffic + periodic SSB sweeps only).
+                            </div>
+                          ) : (
+                            <div className="text-amber-300/90">
+                              <strong>4G LTE Continuous CRS:</strong> Always-on cell reference signals provide ~14.3% continuous RF floor. At {inputs.neighborCellLoadPercent ?? 50}% traffic, effective DL interference load is <strong>{interferenceSummary.effectiveDlTrafficLoadPercent}%</strong>.
+                            </div>
+                          )}
+                          <div className="text-slate-500">
+                            {is5G
+                              ? `Massive MIMO Spatial Filtering: -${interferenceSummary.beamformingIsolationDb} dB inter-cell isolation due to directional beam steering.`
+                              : 'Macro broad sector antenna: 0 dB spatial beam isolation (interference illuminates entire sector).'
+                            }
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Control 6: Intra-Cell Load (Current Cell Loading) [%] */}
+                      <div className="bg-slate-950/60 border border-slate-800/80 p-3 rounded-lg space-y-2">
+                        <div className="flex justify-between items-center">
+                          <label className="text-[11px] text-slate-300 font-semibold uppercase">
+                            Current Cell Loading Factor (Intra-Cell η_intra)
+                          </label>
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              step="5"
+                              value={inputs.intraCellLoadPercent ?? 50}
+                              onChange={(e) => update({ intraCellLoadPercent: Math.min(100, Math.max(0, Number(e.target.value))) })}
+                              className="w-14 bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-xs text-emerald-300 font-bold font-mono text-right focus:border-cyan-400 focus:outline-none"
+                            />
+                            <span className="text-emerald-400 font-bold">%</span>
+                          </div>
+                        </div>
+
+                        <input
+                          type="range"
+                          min="0"
+                          max="100"
+                          step="1"
+                          value={inputs.intraCellLoadPercent ?? 50}
+                          onChange={(e) => update({ intraCellLoadPercent: Number(e.target.value) })}
+                          className="w-full accent-emerald-400 cursor-pointer"
+                        />
+
+                        <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+                          <span>0% (Idle Cell)</span>
+                          <span>30% (Moderate)</span>
+                          <span>50% (Standard)</span>
+                          <span>70% (High Load)</span>
+                          <span>100% (Congested)</span>
+                        </div>
+
+                        {/* Technology-specific intra-cell notes */}
+                        <div className="bg-slate-900/90 border border-slate-800 p-2 rounded text-[10px] text-slate-400 space-y-1">
+                          {is5G ? (
+                            <div className="text-cyan-300/90">
+                              <strong>5G MU-MIMO Intra-Cell Pairing:</strong> Higher cell loading increases co-scheduled UEs on shared PRBs; non-ideal precoding adds <strong>+{interferenceSummary.intraCellMimoLeakageDb} dB</strong> residual spatial inter-layer leakage.
+                            </div>
+                          ) : (
+                            <div className="text-amber-300/90">
+                              <strong>4G SC-FDMA Uplink Noise Rise:</strong> Intra-cell scheduling contention and fractional power control (f=0.55) elevate base station receiver thermal noise rise (IoT).
+                            </div>
+                          )}
+                          <div className="text-slate-500">
+                            Current cell load directly affects UL Interference over Thermal (IoT) and receiver scheduling headroom.
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Bottom Row: Calculated Results, Pessimistic Adjustment & Effective MAPL Deduction */}
+                    <div className="bg-slate-950/80 border border-cyan-900/40 rounded-lg p-3 space-y-3 text-xs font-mono">
+                      {/* Metric Summary Cards */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-[11px]">
+                        <div className="bg-slate-900/90 p-2.5 rounded border border-slate-800">
+                          <span className="text-slate-500 block text-[10px] uppercase">Calculated DL Margin:</span>
+                          <span className="text-cyan-400 font-bold text-sm">
+                            +{interferenceSummary.calculatedDlInterferenceMarginDb.toFixed(1)} dB
+                          </span>
+                          <span className="text-[9px] text-slate-500 block mt-0.5">
+                            {interferenceSummary.scenario === 'ISOLATED_CELL' ? 'Isolated (0 dB)' : 'Hex multi-tier model'}
+                          </span>
+                        </div>
+
+                        <div className="bg-slate-900/90 p-2.5 rounded border border-slate-800">
+                          <span className="text-slate-500 block text-[10px] uppercase">Calculated UL IoT Margin:</span>
+                          <span className="text-emerald-400 font-bold text-sm">
+                            +{interferenceSummary.calculatedUlIotMarginDb.toFixed(1)} dB
+                          </span>
+                          <span className="text-[9px] text-slate-500 block mt-0.5">
+                            Uplink Noise Rise (IoT)
+                          </span>
+                        </div>
+
+                        <div className="bg-slate-900/90 p-2.5 rounded border border-slate-800">
+                          <span className="text-slate-500 block text-[10px] uppercase">5G Spatial Beam Isolation:</span>
+                          <span className="text-purple-400 font-bold text-sm">
+                            {is5G ? `-${interferenceSummary.beamformingIsolationDb.toFixed(1)} dB` : '0.0 dB (Omni)'}
+                          </span>
+                          <span className="text-[9px] text-slate-500 block mt-0.5">
+                            {is5G ? 'Massive MIMO narrow beams' : 'Broad sector broadcast'}
+                          </span>
+                        </div>
+
+                        <div className="bg-slate-900/90 p-2.5 rounded border border-slate-800">
+                          <span className="text-slate-500 block text-[10px] uppercase">Total Edge INR (I / N_0):</span>
+                          <span className="text-amber-400 font-bold text-sm">
+                            {interferenceSummary.scenario === 'ISOLATED_CELL' ? 'N/A' : `${interferenceSummary.totalInrDb.toFixed(1)} dB`}
+                          </span>
+                          <span className="text-[9px] text-slate-500 block mt-0.5">
+                            Interference-to-noise ratio
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Pessimistic Safety Margin Adjustment (User Requested: can be changed to add more value) */}
+                      <div className="pt-2 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
+                            <label className="text-xs text-amber-300 font-semibold uppercase tracking-wider">
+                              Pessimistic Safety Margin Offset (+Δ dB)
+                            </label>
+                            <span className="text-xs font-bold font-mono text-amber-400 bg-amber-950/80 border border-amber-800/60 px-1.5 py-0.5 rounded">
+                              +{(inputs.interferencePessimisticMarginDb ?? 0.0).toFixed(1)} dB
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-400 font-mono">
+                            Add custom safety margin to the calculated interference result for conservative / worst-case planning view
+                          </p>
+                        </div>
+
+                        {/* Quick preset buttons */}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {[
+                            { label: '+0.0 dB (Model)', val: 0.0 },
+                            { label: '+0.5 dB', val: 0.5 },
+                            { label: '+1.0 dB', val: 1.0 },
+                            { label: '+2.0 dB (Worst)', val: 2.0 }
+                          ].map((p) => {
+                            const isPSelected = (inputs.interferencePessimisticMarginDb ?? 0.0) === p.val;
+                            return (
+                              <button
+                                key={p.label}
+                                type="button"
+                                onClick={() => update({
+                                  interferencePessimisticMarginDb: p.val,
+                                  interferenceMarginDb: Number((interferenceSummary.calculatedDlInterferenceMarginDb + p.val).toFixed(1)),
+                                  iotMarginDb: Number((interferenceSummary.calculatedUlIotMarginDb + p.val).toFixed(1))
+                                })}
+                                className={`px-2 py-1 rounded text-[10px] font-mono transition-all cursor-pointer ${
+                                  isPSelected
+                                    ? 'bg-amber-500 text-slate-950 font-bold shadow'
+                                    : 'bg-slate-900 border border-slate-700 text-slate-300 hover:border-slate-500'
+                                }`}
+                              >
+                                {p.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Slider & Numerical input for Pessimistic Offset */}
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="range"
+                          min="0"
+                          max="4"
+                          step="0.1"
+                          value={inputs.interferencePessimisticMarginDb ?? 0.0}
+                          onChange={(e) => {
+                            const pVal = Number(e.target.value);
+                            update({
+                              interferencePessimisticMarginDb: pVal,
+                              interferenceMarginDb: Number((interferenceSummary.calculatedDlInterferenceMarginDb + pVal).toFixed(1)),
+                              iotMarginDb: Number((interferenceSummary.calculatedUlIotMarginDb + pVal).toFixed(1))
+                            });
+                          }}
+                          className="w-full accent-amber-400 cursor-pointer"
+                        />
+                        <div className="flex items-center gap-1 shrink-0">
+                          <input
+                            type="number"
+                            min="0"
+                            max="6"
+                            step="0.1"
+                            value={inputs.interferencePessimisticMarginDb ?? 0.0}
+                            onChange={(e) => {
+                              const pVal = Math.max(0, Number(e.target.value));
+                              update({
+                                interferencePessimisticMarginDb: pVal,
+                                interferenceMarginDb: Number((interferenceSummary.calculatedDlInterferenceMarginDb + pVal).toFixed(1)),
+                                iotMarginDb: Number((interferenceSummary.calculatedUlIotMarginDb + pVal).toFixed(1))
+                              });
+                            }}
+                            className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-amber-300 font-mono font-bold text-right focus:border-amber-400 focus:outline-none"
+                          />
+                          <span className="text-xs text-slate-400 font-mono">dB</span>
+                        </div>
+                      </div>
+
+                      {/* Final Applied Margins Bar */}
+                      <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                          <span className="text-slate-300">
+                            Effective Applied Margins:
+                          </span>
+                          <span className="text-cyan-300 font-bold">
+                            DL Interference = {interferenceSummary.effectiveDlInterferenceMarginDb.toFixed(1)} dB
+                          </span>
+                          <span className="text-slate-600">·</span>
+                          <span className="text-emerald-300 font-bold">
+                            UL IoT Noise Rise = {interferenceSummary.effectiveUlIotMarginDb.toFixed(1)} dB
+                          </span>
+                        </div>
+
+                        <div className="text-[10px] text-slate-400 font-mono">
+                          Formula: <span className="text-slate-300">{interferenceSummary.methodFormula}</span>
+                        </div>
                       </div>
                     </div>
                   </div>

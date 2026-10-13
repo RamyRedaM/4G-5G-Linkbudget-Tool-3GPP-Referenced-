@@ -11,7 +11,12 @@ import {
   VoLteCodec,
   RedCapProfile,
   McxProfile,
-  UeMimoMode
+  UeMimoMode,
+  OverheadSummary,
+  OverheadMode,
+  DmrsConfigType,
+  CsiRsMultiplexingType,
+  CsiRsResourceType
 } from '../types/telecom';
 import { TELECOM_BANDS, MIMO_CONFIGS, TDD_FRAME_PATTERNS } from '../data/telecomBands';
 import {
@@ -19,11 +24,169 @@ import {
   calculateDistanceForPathLoss,
   calculateShadowFadingMargin
 } from './spmPropagation';
+import { calculateInterferenceSummary } from './interferenceCalculator';
 
 /**
- * 3GPP Compliant 4G/5G Link Budget and Throughput Engine
- * Ref: 3GPP TS 38.101, TS 38.104, TS 38.901, TS 38.306, TS 36.101, TS 38.211, TS 38.213
+ * 3GPP TS 38.306 Section 4.1.2 & TS 38.211/38.214 Physical Layer Overhead Engine
+ * - 38.306 Default Mode:
+ *   FR1 (Sub-6 GHz): DL Overhead = 0.14 (14%), UL Overhead = 0.08 (8%)
+ *   FR2 (mmWave):    DL Overhead = 0.18 (18%), UL Overhead = 0.10 (10%)
+ * - Detailed Mode:
+ *   Granularly calculates SSB, PDCCH CORESET symbols, DMRS config, CSI-RS, TRS, and PTRS
  */
+export function calculate5GOverhead(
+  inputs: LinkBudgetInputs,
+  dlFreqMHz: number,
+  bwMHz: number,
+  scsKhz: number,
+  isMmWave: boolean
+): OverheadSummary {
+  const isFR2 = isMmWave || dlFreqMHz > 7125;
+  const mode: OverheadMode = inputs.overheadMode || '38306_DEFAULT';
+
+  // 1. Default 3GPP TS 38.306 Values:
+  // FR1 (Sub-6 GHz): DL = 0.14 (14%), UL = 0.08 (8%)
+  // FR2 (mmWave):    DL = 0.18 (18%), UL = 0.10 (10%)
+  const defaultDl = isFR2 ? 0.18 : 0.14;
+  const defaultUl = isFR2 ? 0.10 : 0.08;
+
+  if (mode === '38306_DEFAULT') {
+    const dlRatio = inputs.customDlOverhead ?? defaultDl;
+    const ulRatio = inputs.customUlOverhead ?? defaultUl;
+    return {
+      mode: '38306_DEFAULT',
+      frequencyRange: isFR2 ? 'FR2' : 'FR1',
+      dlOverheadRatio: dlRatio,
+      ulOverheadRatio: ulRatio,
+      dlOverheadPercent: Number((dlRatio * 100).toFixed(1)),
+      ulOverheadPercent: Number((ulRatio * 100).toFixed(1)),
+      breakdown: {
+        ssbPercent: isFR2 ? 1.2 : 0.45,
+        pdcchPercent: isFR2 ? 4.5 : 4.0,
+        dmrsDlPercent: 7.14,
+        csiRsPercent: 1.0,
+        trsPercent: 0.5,
+        ptrsDlPercent: isFR2 ? 0.9 : 0.0,
+        dmrsUlPercent: 5.0,
+        pucchPercent: 2.2,
+        srsPercent: 0.8,
+        ptrsUlPercent: isFR2 ? 0.5 : 0.0
+      }
+    };
+  }
+
+  // 2. Detailed Mode Component Calculation (3GPP TS 38.211 / TS 38.214)
+  const nPrb = Math.max(10, Math.floor((bwMHz * 1000) / (12 * scsKhz) * 0.92));
+  const slotsPerSubframe = scsKhz / 15;
+  const slotsPerMs = slotsPerSubframe;
+
+  // A. SSB Overhead (TS 38.211 §7.4.3.1):
+  // 4 symbols x 20 RBs transmitted in L_max beams every ssbPeriodicityMs
+  const ssbPeriodicity = inputs.ssbPeriodicityMs ?? 20;
+  const numBeams = inputs.numberOfBeams ?? (isFR2 ? 16 : 4);
+  const totalSlotsInPeriod = ssbPeriodicity * slotsPerMs;
+  const totalReInPeriod = totalSlotsInPeriod * 14 * (nPrb * 12);
+  const ssbReInBurst = numBeams * (4 * 20 * 12);
+  const ssbPercent = Number(Math.min(3.0, (ssbReInBurst / totalReInPeriod) * 100).toFixed(2));
+
+  // B. PDCCH CORESET Symbols Overhead (TS 38.211 §7.3.2):
+  // CORESET duration: 1, 2, or 3 symbols per 14-symbol slot
+  const coresetSymbols = inputs.pdcchCoresetSymbols ?? (isFR2 ? 1 : 2);
+  const coresetPrbRatio = Math.min(1.0, bwMHz <= 20 ? 1.0 : (48 + Math.min(48, (inputs.numberOfBeams ?? 1) * 8)) / nPrb);
+  const pdcchPercent = Number(((coresetSymbols / 14) * coresetPrbRatio * 100).toFixed(2));
+
+  // C. DMRS Configuration Overhead (TS 38.211 §7.4.1.1):
+  const dmrsSymbols = inputs.dmrsSymbolsPerSlot ?? (inputs.dmrsAdditionalPositions !== undefined ? inputs.dmrsAdditionalPositions + 1 : 1);
+  const dmrsType = inputs.dmrsConfigType || 'TYPE_1';
+  const dmrsRePerRb = dmrsType === 'TYPE_1' ? 6 : 4;
+  const dmrsDlPercent = Number(((dmrsSymbols * dmrsRePerRb) / (14 * 12) * 100).toFixed(2));
+
+  // D. CSI-RS Overhead (TS 38.211 §7.4.1.5 & TS 38.214 §5.1.4):
+  const csiEnabled = inputs.csiRsEnabled ?? true;
+  const csiDensity = inputs.csiRsDensity ?? 1.0;
+  const csiPorts = inputs.csiRsPorts ?? (inputs.csiRsReportsPerPeriod ? Math.min(32, inputs.csiRsReportsPerPeriod * 4) : 4);
+  const csiMultiplexing: CsiRsMultiplexingType = inputs.csiRsMultiplexing || (csiPorts >= 8 ? 'cdm4-FD2-TD2' : 'fd-CDM2');
+  const csiResourceType: CsiRsResourceType = inputs.csiRsResourceType || 'PERIODIC';
+  const csiPeriodSlots = inputs.csiRsCaPeriodicitySlots ?? 20;
+
+  // Orthogonal Code Division Multiplexing (CDM) group sizing:
+  // noCDM: K=1; fd-CDM2: K=2 (freq); cdm4-FD2-TD2: K=4 (freq x time); cdm8-FD2-TD4: K=8 (freq x time)
+  const cdmSize = csiMultiplexing === 'cdm8-FD2-TD4' ? 8 : csiMultiplexing === 'cdm4-FD2-TD2' ? 4 : csiMultiplexing === 'fd-CDM2' ? 2 : 1;
+  const cdmGroups = Math.max(1, Math.ceil(csiPorts / cdmSize));
+  // Total REs per RB consumed when CSI-RS transmitted:
+  const cdmRePerGroup = csiMultiplexing === 'cdm8-FD2-TD4' ? 8 : csiMultiplexing === 'cdm4-FD2-TD2' ? 4 : csiMultiplexing === 'fd-CDM2' ? 2 : 1;
+  const baseCsiRePerRb = cdmGroups * (cdmRePerGroup / Math.max(1, cdmSize / (csiMultiplexing === 'noCDM' ? 1 : 2))) * csiDensity;
+  
+  // ZP-CSI-RS Rate matching: PDSCH maps around interference measurement Zero-Power CSI-RS
+  const zpRateMatchRe = (inputs.zpCsiRsRateMatching ?? true) ? 2.0 * csiDensity : 0.0;
+  
+  // Duty cycle / triggering factor:
+  const csiDutyFactor = csiResourceType === 'PERIODIC' ? 1.0 : csiResourceType === 'SEMI_PERSISTENT' ? 0.5 : 0.2;
+  const totalCsiRePerSlotOccasion = (baseCsiRePerRb + zpRateMatchRe) * csiDutyFactor;
+  
+  const csiRsPercent = csiEnabled
+    ? Number(((totalCsiRePerSlotOccasion / (12 * 14 * csiPeriodSlots)) * 100).toFixed(2))
+    : 0.0;
+
+  // CDM spatial multiplexing efficiency / savings (% RE reduction compared to unmultiplexed ports):
+  const unmultiplexedRe = csiPorts * csiDensity * csiDutyFactor;
+  const csiRsCdmReductionPercent = (csiPorts > 1 && unmultiplexedRe > 0)
+    ? Math.max(0, Math.min(85, Math.round(((unmultiplexedRe - totalCsiRePerSlotOccasion) / unmultiplexedRe) * 100)))
+    : 0;
+
+  // E. TRS (Tracking Reference Signal) Overhead:
+  const trsEnabled = inputs.trsEnabled ?? true;
+  const trsPeriodMs = inputs.trsPeriodicityMs ?? 20;
+  const trsSlotsInPeriod = trsPeriodMs * slotsPerMs;
+  const trsPercent = trsEnabled
+    ? Number(((4 * 3) / (12 * 14 * trsSlotsInPeriod) * 100).toFixed(2))
+    : 0.0;
+
+  // F. PTRS (Phase Tracking Reference Signal) Overhead (TS 38.211 §7.4.1.7):
+  const ptrsEnabled = inputs.ptrsEnabled ?? isFR2;
+  const ptrsTimeDensity = inputs.ptrsTimeDensity ?? 1;
+  const ptrsFreqDensity = inputs.ptrsFreqDensity ?? 2;
+  const ptrsDlPercent = ptrsEnabled
+    ? Number(((1 / (ptrsFreqDensity * 12 * ptrsTimeDensity)) * 100).toFixed(2))
+    : 0.0;
+
+  // Total Downlink Detailed Overhead:
+  const totalDlPercent = Number((ssbPercent + pdcchPercent + dmrsDlPercent + csiRsPercent + trsPercent + ptrsDlPercent).toFixed(2));
+  const dlRatio = Number((Math.min(0.50, Math.max(0.05, totalDlPercent / 100))).toFixed(4));
+
+  // Uplink Detailed Components:
+  const dmrsUlPercent = Number(((1 * 6) / (14 * 12) * 100).toFixed(2));
+  const pucchPercent = Number((Math.min(8.0, Math.max(2.0, (2 / nPrb) * 100 + 1.5))).toFixed(2));
+  const srsPercent = 0.75;
+  const ptrsUlPercent = isFR2 && ptrsEnabled ? 0.45 : 0.0;
+  const totalUlPercent = Number((dmrsUlPercent + pucchPercent + srsPercent + ptrsUlPercent).toFixed(2));
+  const ulRatio = Number((Math.min(0.40, Math.max(0.04, totalUlPercent / 100))).toFixed(4));
+
+  return {
+    mode: 'DETAILED',
+    frequencyRange: isFR2 ? 'FR2' : 'FR1',
+    dlOverheadRatio: dlRatio,
+    ulOverheadRatio: ulRatio,
+    dlOverheadPercent: Number((dlRatio * 100).toFixed(1)),
+    ulOverheadPercent: Number((ulRatio * 100).toFixed(1)),
+    breakdown: {
+      ssbPercent,
+      pdcchPercent,
+      dmrsDlPercent,
+      csiRsPercent,
+      trsPercent,
+      ptrsDlPercent,
+      dmrsUlPercent,
+      pucchPercent,
+      srsPercent,
+      ptrsUlPercent,
+      csiRsCdmReductionPercent
+    },
+    csiRsMultiplexing: csiMultiplexing,
+    csiRsResourceType: csiResourceType,
+    csiRsPorts: csiPorts
+  };
+}
 
 export interface ControlOverheadsResult {
   avgPdcchOverheadPercent: number; // Dynamic function of 3GPP parameters (can vary & exceed 10%)
@@ -32,33 +195,39 @@ export interface ControlOverheadsResult {
     basePercent: number;
     bwFactorPercent: number;
     beamFactorPercent: number;
+    coresetFactorPercent: number;
     caFactorPercent: number;
     csiFactorPercent: number;
     dmrsFactorPercent: number;
+    blerFactorPercent: number;
   };
   pucchBreakdown: {
     basePercent: number;
     csiReportsPercent: number;
     csiPeriodicityPercent: number;
+    csiPortsPercent: number;
     caFactorPercent: number;
     tddFactorPercent: number;
     bwFactorPercent: number;
+    blerFactorPercent: number;
   };
 }
 
 /**
  * Calculates dynamically average PDCCH and PUCCH overheads based on
- * 3GPP defined parameters: channel bandwidth, active beams, carrier aggregation,
- * CSI-RS reporting density, DMRS numerology, residual BLER, and TDD frame ratio.
+ * 3GPP defined parameters: channel bandwidth, active beams (1-8), CORESET duration, carrier aggregation,
+ * CSI-RS reporting density & ports, DMRS numerology, residual BLER, and TDD frame ratio.
  * No artificial capping: can freely exceed 10% (PDCCH) or 20% (PUCCH) to reflect
  * authentic reduction in PDSCH and PUSCH traffic shares.
  */
 export function calculateControlOverheads(inputs: LinkBudgetInputs): ControlOverheadsResult {
   const is4G = inputs.technology === '4G';
   const numBeams = is4G ? 1 : (inputs.numberOfBeams ?? 1);
+  const coresetSymbols = is4G ? 2 : (inputs.pdcchCoresetSymbols ?? 2);
   const dmrsSymbols = is4G ? 1 : (inputs.dmrsSymbolsPerSlot ?? 1);
   const csiReports = is4G ? 1 : (inputs.csiRsReportsPerPeriod ?? 2);
   const csiPeriodicity = is4G ? 20 : (inputs.csiRsCaPeriodicitySlots ?? 20);
+  const csiPorts = inputs.csiRsPorts ?? (inputs.csiRsReportsPerPeriod ? Math.min(32, inputs.csiRsReportsPerPeriod * 4) : 4);
   const caCarriers = inputs.caEnabled ? (inputs.caCarriersCount || 1) : 1;
   const bwMHz = inputs.bandwidthMHz;
 
@@ -66,17 +235,19 @@ export function calculateControlOverheads(inputs: LinkBudgetInputs): ControlOver
   // In narrow bandwidths or high multi-carrier / multi-beam, PDCCH CORESET PRB ratio scales up
   const bwFactor = bwMHz <= 1.4 ? 12.0 : bwMHz <= 3 ? 7.5 : bwMHz <= 5 ? 4.5 : bwMHz <= 10 ? 2.5 : bwMHz <= 20 ? 1.0 : bwMHz <= 50 ? 0.0 : -0.8;
   // Multi-beam sweeping increases PDCCH search space monitoring occasions (TS 38.213 §10)
-  const beamFactor = is4G ? 0.0 : (numBeams - 1) * 0.45;
+  const beamFactor = is4G ? 0.0 : (numBeams - 1) * 0.42;
+  // CORESET duration in symbols: 1 symbol (-1.4%), 2 symbols (0.0%), 3 symbols (+2.2%)
+  const coresetFactor = is4G ? 0.0 : (coresetSymbols - 2) * 1.8;
   // Carrier aggregation cross-carrier & multi-carrier DCI scheduling overhead
   const caFactor = (caCarriers - 1) * 0.85;
   // CSI-RS triggering occasions on PDCCH
-  const csiFactor = is4G ? 0.0 : (csiReports - 1) * 0.40;
+  const csiFactor = is4G ? 0.0 : (csiReports - 1) * 0.35 + (inputs.csiRsResourceType === 'APERIODIC' ? 0.40 : 0.0);
   // DMRS additional symbols per slot
   const dmrsFactor = is4G ? 0.0 : (dmrsSymbols - 1) * 0.50;
   // Residual BLER retransmission scheduling DCI demands
   const blerPdcchFactor = Math.max(0, ((inputs.residualBlerTargetPercent ?? 10) - 10) * 0.12);
 
-  const rawPdcch = 4.8 + bwFactor + beamFactor + caFactor + csiFactor + dmrsFactor + blerPdcchFactor;
+  const rawPdcch = 4.8 + bwFactor + beamFactor + coresetFactor + caFactor + csiFactor + dmrsFactor + blerPdcchFactor;
   // Uncapped: only bounded by physical baseline (> 1.8%)
   const avgPdcchOverheadPercent = Number(Math.max(1.8, rawPdcch).toFixed(2));
 
@@ -87,6 +258,8 @@ export function calculateControlOverheads(inputs: LinkBudgetInputs): ControlOver
   // Periodic & semi-persistent CSI reporting load on PUCCH
   const csiReportsPercent = is4G ? 1.4 : csiReports * 1.35;
   const csiPeriodicityPercent = is4G ? 0.9 : (80 / csiPeriodicity) * 0.85;
+  // High CSI-RS port count feedback (Type II codebook payload on PUCCH)
+  const csiPortsPercent = is4G ? 0.0 : Math.max(0, (csiPorts - 4) * 0.14);
   
   // CA multi-carrier HARQ codebook (Type-1 / Type-2 PUCCH format 2/3/4)
   const caPucchFactor = (caCarriers - 1) * 2.2;
@@ -119,7 +292,7 @@ export function calculateControlOverheads(inputs: LinkBudgetInputs): ControlOver
 
   const rawPucch = is4G
     ? 4.5 + bwPucchFactor + (caCarriers - 1) * 1.8 + blerPucchFactor
-    : 3.5 + bwPucchFactor + csiReportsPercent + csiPeriodicityPercent + caPucchFactor + tddPucchFactor + blerPucchFactor;
+    : 3.5 + bwPucchFactor + csiReportsPercent + csiPeriodicityPercent + csiPortsPercent + caPucchFactor + tddPucchFactor + blerPucchFactor;
   // Uncapped: only bounded by physical baseline (> 2.5%)
   const avgPucchOverheadPercent = Number(Math.max(2.5, rawPucch).toFixed(2));
 
@@ -130,17 +303,21 @@ export function calculateControlOverheads(inputs: LinkBudgetInputs): ControlOver
       basePercent: 4.8,
       bwFactorPercent: bwFactor,
       beamFactorPercent: beamFactor,
+      coresetFactorPercent: coresetFactor,
       caFactorPercent: caFactor,
       csiFactorPercent: csiFactor,
-      dmrsFactorPercent: dmrsFactor
+      dmrsFactorPercent: dmrsFactor,
+      blerFactorPercent: blerPdcchFactor
     },
     pucchBreakdown: {
       basePercent: 3.5,
       csiReportsPercent,
       csiPeriodicityPercent,
+      csiPortsPercent,
       caFactorPercent: caPucchFactor,
       tddFactorPercent: tddPucchFactor,
-      bwFactorPercent: bwPucchFactor
+      bwFactorPercent: bwPucchFactor,
+      blerFactorPercent: blerPucchFactor
     }
   };
 }
@@ -751,6 +928,8 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
 
   // 9. Margins
   // Shadow Fading Margin based on log-normal fading standard deviation (sigma) and coverage probability
+  // 9. Margins & 3GPP Interference Engine
+  // Shadow Fading Margin based on log-normal fading standard deviation (sigma) and coverage probability
   // M_SF = z * sigma_SF (or user direct input from Link Budget Configuration panel)
   const shadowFadingMarginDb = (inputs.shadowFadingMarginDb !== undefined && inputs.shadowFadingMarginDb !== null && !isNaN(inputs.shadowFadingMarginDb))
     ? Number(inputs.shadowFadingMarginDb)
@@ -763,8 +942,47 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
   const dlFadingMarginDb = inputs.dlFadingMarginDb ?? 2.0;
   const ulFadingMarginDb = inputs.ulFadingMarginDb ?? 2.5;
 
-  const totalDlMarginsDb = Number((shadowFadingMarginDb + inputs.interferenceMarginDb + dlFadingMarginDb).toFixed(1));
-  const totalUlMarginsDb = Number((shadowFadingMarginDb + inputs.iotMarginDb + ulFadingMarginDb).toFixed(1));
+  // Tentative cell range estimation for geometric Inter-Site Distance (ISD = 1.5 * R)
+  const tentativeRawMapl = Math.min(
+    bsEirpDbm + inputs.ueAntennaGainDbi - inputs.bodyLossDb - ueRxSensitivityDbm - shadowFadingMarginDb - dlFadingMarginDb - 3.0,
+    ueEirpDbm + inputs.bsAntennaGainDbi - inputs.bsFeederCableLossDb - bsRxSensitivityDbm - shadowFadingMarginDb - ulFadingMarginDb - 3.0
+  );
+  const tentativeRangeKm = calculateDistanceForPathLoss(tentativeRawMapl, {
+    freqMHz: dlFreqMHz,
+    hbMeters: inputs.bsHeightMeters,
+    hmMeters: inputs.ueHeightMeters,
+    model: inputs.propagationModel,
+    clutter: inputs.environmentClutter,
+    scenario: inputs.indoorOutdoorScenario,
+    additionalPenetrationLossDb: inputs.additionalPenetrationLossDb,
+    foliageLossDb: inputs.foliageLossDb,
+    spmK1Override: inputs.spmK1,
+    spmK2Override: inputs.spmK2,
+    shadowFadingStdDevDb: inputs.shadowFadingStdDevDb,
+    coverageProbability: inputs.coverageProbability
+  });
+  const tentativeCellRangeMeters = Math.max(100, Math.round(tentativeRangeKm * 1000));
+
+  // 3GPP TR 36.942 / TR 38.901 / ITU-R M.2412 Interference Summary & Cell Loading Calculation:
+  const interferenceSummary = calculateInterferenceSummary(
+    inputs,
+    tentativeCellRangeMeters,
+    dlFreqMHz,
+    isMmWave
+  );
+
+  // Use the effective calculated interference margins (which factor in scenario, layout tiers, loading, 4G CRS vs 5G beamforming, and pessimistic offsets)
+  // or explicit direct input if given
+  const effectiveDlInterferenceMarginDb = (inputs.interferenceScenario !== undefined)
+    ? interferenceSummary.effectiveDlInterferenceMarginDb
+    : Number((inputs.interferenceMarginDb ?? 3.0).toFixed(1));
+
+  const effectiveUlIotMarginDb = (inputs.interferenceScenario !== undefined)
+    ? interferenceSummary.effectiveUlIotMarginDb
+    : Number((inputs.iotMarginDb ?? 3.0).toFixed(1));
+
+  const totalDlMarginsDb = Number((shadowFadingMarginDb + effectiveDlInterferenceMarginDb + dlFadingMarginDb).toFixed(1));
+  const totalUlMarginsDb = Number((shadowFadingMarginDb + effectiveUlIotMarginDb + ulFadingMarginDb).toFixed(1));
 
   // 10. MAPL Calculation (Maximum Allowable Path Loss)
   // DL MAPL = BS_EIRP + UE_AntennaGain - BodyLoss - UE_RxSensitivity - TotalDlMargins
@@ -809,9 +1027,52 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
   const maxCellRangeKm = Number(calculateDistanceForPathLoss(systemMaplDb, propParams).toFixed(3));
   const maxCellRangeMeters = Math.round(maxCellRangeKm * 1000);
 
-  // 11. Throughput Calculation Function (3GPP TS 38.306)
-  // Data Rate (Mbps) = 10^-6 * sum_j(v * Qm * f * Rmax * (12*N_prb / Ts) * (1 - OH))
+  // 11. 3GPP TS 38.306 Overhead & Throughput Calculation Function
+  const overheadSummary = calculate5GOverhead(inputs, dlFreqMHz, inputs.bandwidthMHz, scsKhz, isMmWave);
   const maxDlMod = inputs.maxDlModulation || '256QAM';
+
+  // 12. Base Station Antenna Tilt & Coverage Geometry (3GPP TR 38.901 / TR 36.814)
+  const mechanicalTiltDeg = Number(inputs.bsMechanicalTiltDeg ?? 2.0);
+  const electricalTiltDeg = Number(inputs.bsElectricalTiltDeg ?? 4.0);
+  const totalTiltDeg = Number((mechanicalTiltDeg + electricalTiltDeg).toFixed(1));
+  const verticalBeamwidthDeg = Number(inputs.bsVerticalBeamwidthDeg ?? 7.0);
+
+  const deltaH = Math.max(1.0, inputs.bsHeightMeters - inputs.ueHeightMeters);
+  const degToRad = Math.PI / 180;
+  
+  // Main beam boresight ground intercept distance:
+  const mainTiltRad = Math.max(0.2, totalTiltDeg) * degToRad;
+  const mainBeamGroundDistanceMeters = Math.round(deltaH / Math.tan(mainTiltRad));
+
+  // 3dB vertical beam inner & outer ground intercepts:
+  const innerTiltRad = Math.max(0.5, totalTiltDeg + verticalBeamwidthDeg / 2) * degToRad;
+  const outerTiltDeg = totalTiltDeg - verticalBeamwidthDeg / 2;
+  const innerCoverageDistanceMeters = Math.round(deltaH / Math.tan(innerTiltRad));
+  const outerCoverageDistanceMeters = outerTiltDeg > 0.3
+    ? Math.round(deltaH / Math.tan(outerTiltDeg * degToRad))
+    : Math.round(maxCellRangeMeters * 1.5);
+
+  // Cell-edge elevation angle and vertical pattern loss A_V(theta_edge) in dB (3GPP TR 38.901 Table 7.3-1):
+  const cellEdgeDistanceMeters = Math.max(50, maxCellRangeMeters);
+  const thetaEdgeDeg = Math.atan2(deltaH, cellEdgeDistanceMeters) / degToRad;
+  const patternAngleDelta = Math.abs(thetaEdgeDeg - totalTiltDeg);
+  const cellEdgePatternLossDb = Number(Math.min(25.0, 12 * Math.pow(patternAngleDelta / verticalBeamwidthDeg, 2)).toFixed(2));
+
+  // Optimal geometric downtilt to cell edge:
+  // theta_opt = arctan(deltaH / R_max) + theta_3dB / 2
+  const optimalTiltDeg = Number((thetaEdgeDeg + verticalBeamwidthDeg / 2).toFixed(1));
+
+  const antennaTiltSummary = {
+    mechanicalTiltDeg,
+    electricalTiltDeg,
+    totalTiltDeg,
+    verticalBeamwidthDeg,
+    mainBeamGroundDistanceMeters,
+    innerCoverageDistanceMeters,
+    outerCoverageDistanceMeters,
+    cellEdgePatternLossDb,
+    optimalTiltDeg
+  };
 
   const calculate3GPPThroughput = (
     bwMHz: number,
@@ -860,29 +1121,19 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
       rank = Math.min(layers, effectiveUlLayers);
     }
 
-    // Physical overhead breakdown according to 3GPP TS 38.211 / TS 38.214:
-    // DMRS symbols per 14-symbol slot: (dmrsSymbolsPerSlot / 14)
-    // SSB burst overhead: depends on number of beams (L_max) and SSB periodicity (T_ssb in ms)
-    // CSI-RS, PDCCH / PUCCH, guard bands, SRS overhead
-    const dmrsSymbols = inputs.dmrsSymbolsPerSlot ?? 1;
-    const dmrsOh = dmrsSymbols / 14; // e.g. 1/14 ~ 7.1%, 2/14 ~ 14.3%, 3/14 ~ 21.4%
-    
-    // SSB overhead calculation:
-    // N_beams SSBs transmitted every ssbPeriodicityMs
-    const ssbPeriodicity = inputs.ssbPeriodicityMs ?? 20;
-    const numBeamsOh = inputs.numberOfBeams ?? 1;
-    // Each SSB occupies 4 symbols across 20 RBs (240 subcarriers)
-    const slotsPerMs = scsKhz / 15;
-    const totalSlotsInBurst = ssbPeriodicity * slotsPerMs;
-    const ssbSymbolRatio = (numBeamsOh * 4) / (totalSlotsInBurst * 14);
-    const ssbOh = isUplink ? 0 : Math.min(0.06, ssbSymbolRatio);
-
-    // Calculated Control channel overhead: PDCCH for DL, PUCCH for UL
-    // Dynamic function of 3GPP parameters that directly reduces PDSCH and PUSCH traffic share
-    const ctrlOh = isUplink
-      ? (controlOverheads.avgPucchOverheadPercent / 100)
-      : (controlOverheads.avgPdcchOverheadPercent / 100);
-    const totalOverhead = Math.min(0.75, dmrsOh + ssbOh + ctrlOh);
+    // 3GPP Physical Layer Overhead Breakdown (TS 38.306 Table 4.1.2-1 & Detailed TS 38.211/38.214)
+    let totalOverhead = 0;
+    if (is5G) {
+      totalOverhead = isUplink ? overheadSummary.ulOverheadRatio : overheadSummary.dlOverheadRatio;
+    } else {
+      // 4G LTE physical overheads: CRS (4 ports ~ 14.3%), PDCCH (1-3 symbols ~ 7-14%), PUCCH
+      const dmrsSymbols = inputs.dmrsSymbolsPerSlot ?? 1;
+      const dmrsOh = dmrsSymbols / 14;
+      const ctrlOh = isUplink
+        ? (controlOverheads.avgPucchOverheadPercent / 100)
+        : (controlOverheads.avgPdcchOverheadPercent / 100);
+      totalOverhead = Math.min(0.70, dmrsOh + ctrlOh);
+    }
 
     const prbs = Math.floor((bwMHz * 1000) / (12 * scsKhz) * 0.92);
     const symbolsPerSec = 14 * (scsKhz / 15) * 1000;
@@ -1228,11 +1479,11 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
     },
     {
       name: 'Interference Margin / IoT',
-      dlValue: `${inputs.interferenceMarginDb.toFixed(1)}`,
-      ulValue: `${inputs.iotMarginDb.toFixed(1)} (IoT)`,
+      dlValue: `${effectiveDlInterferenceMarginDb.toFixed(1)} dB (${interferenceSummary.scenario === 'ISOLATED_CELL' ? 'Isolated' : interferenceSummary.tiers + '-Tier ' + interferenceSummary.neighborLoadPercent + '% load'})`,
+      ulValue: `${effectiveUlIotMarginDb.toFixed(1)} dB (IoT ${interferenceSummary.scenario === 'ISOLATED_CELL' ? 'Isolated' : interferenceSummary.intraCellLoadPercent + '% load'})`,
       unit: 'dB',
       category: 'MARGINS',
-      description: 'Downlink inter-cell interference vs Uplink Interference over Thermal'
+      description: `3GPP Inter-cell & intra-cell loading margin (${interferenceSummary.methodName})`
     },
     {
       name: 'Shadow Fading Margin (M_SF)',
@@ -1313,6 +1564,8 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
     },
     avgPdcchOverheadPercent: controlOverheads.avgPdcchOverheadPercent,
     avgPucchOverheadPercent: controlOverheads.avgPucchOverheadPercent,
+    overheadSummary,
+    antennaTiltSummary,
     rxSensitivityBreakdown: {
       dl: {
         thermalNoisePerSubcarrierDbm: dlThermalNoisePerScDbm,
@@ -1358,6 +1611,7 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
       calculatedEdgeRangeKm: maxCellRangeKm,
       calculatedEdgeRangeMeters: maxCellRangeMeters,
       standardReference: serviceResolved.standardReference
-    }
+    },
+    interferenceSummary
   };
 }

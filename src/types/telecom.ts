@@ -33,7 +33,7 @@ export type UeCategory =
   | 'LTE_CAT4_STD'    // 4G LTE Cat 4 Legacy (2x2 DL / 1Tx UL - 150/50 Mbps)
   | 'LTE_CATM1_IOT';  // Cellular IoT Cat-M1 / NB-IoT (1T1R / 23 dBm / 1.4 MHz)
 export type EnvironmentClutter = 'DENSE_URBAN' | 'URBAN' | 'SUBURBAN' | 'RURAL';
-export type IndoorOutdoorScenario = 'OUTDOOR_LOS' | 'OUTDOOR_NLOS' | 'IN_VEHICLE' | 'INDOOR_STANDARD' | 'INDOOR_DEEP';
+export type IndoorOutdoorScenario = 'OUTDOOR_LOS' | 'OUTDOOR_NLOS' | 'IN_VEHICLE' | 'INDOOR_STANDARD' | 'TUNNEL_COVERAGE' | 'INDOOR_DEEP';
 export type PropagationModelType = 'SPM' | '3GPP_UMA' | '3GPP_UMI' | '3GPP_RMA' | 'COST231_HATA' | 'FSPL';
 
 export interface BandInfo {
@@ -46,6 +46,79 @@ export interface BandInfo {
   bandwidthsMHz: number[];
   commonName: string;
   isMmWave?: boolean;
+}
+
+export type OverheadMode = '38306_DEFAULT' | 'DETAILED';
+export type DmrsConfigType = 'TYPE_1' | 'TYPE_2';
+export type CsiRsMultiplexingType = 'noCDM' | 'fd-CDM2' | 'cdm4-FD2-TD2' | 'cdm8-FD2-TD4';
+export type CsiRsResourceType = 'PERIODIC' | 'SEMI_PERSISTENT' | 'APERIODIC';
+
+// Interference Modeling (4G & 5G Link Budget - 3GPP TR 36.942 / TR 38.901 / ITU-R M.2412)
+export type InterferenceScenarioType = 'NEIGHBORING_CELLS' | 'ISOLATED_CELL';
+export type InterferenceHexLayoutTiers = 1 | 2; // 1 tier = 7 sites (18 neighbor sectors), 2 tiers = 19 sites (54 neighbor sectors)
+export type InterferenceMarginMethod =
+  | '3GPP_GEOMETRY_MULTITIER' // 3GPP TR 36.942 / TR 38.901 Hexagonal Multi-Tier Geometry Coupling
+  | 'VENDOR_LOAD_COUPLING'   // Industry Best Practice (Ericsson/Nokia/Huawei): -10*log10(1 - η·ρ)
+  | 'ITU_R_INR_SCALING'       // ITU-R M.2412 Interference-over-Thermal (INR) Model: 10*log10(1 + INR_max·(η/100)^γ)
+  | 'SINR_DESENSITIZATION';   // 3GPP Effective Receiver Desensitization / SINR Degradation
+
+export interface InterferenceCalculationSummary {
+  scenario: InterferenceScenarioType;
+  tiers: InterferenceHexLayoutTiers;
+  totalSites: number; // 7 or 19
+  totalNeighborSectors: number; // 18 or 54
+  isdMeters: number;
+  isdMultiplier: number;
+  neighborLoadPercent: number;
+  intraCellLoadPercent: number;
+  method: InterferenceMarginMethod;
+  methodName: string;
+  methodFormula: string;
+  technology: '4G' | '5G';
+  
+  // Technology Specific Factors
+  crsLoadFloorPercent: number; // 4G LTE CRS floor (~14.3% effective continuous power) vs 5G 0% (lean carrier)
+  effectiveDlTrafficLoadPercent: number; // Traffic + reference signal effective DL load
+  beamformingIsolationDb: number; // 5G beamforming spatial filtering isolation gain (3.0 to 6.5 dB) vs 4G 0 dB
+  intraCellMimoLeakageDb: number; // 5G MU-MIMO inter-layer leakage / 4G ICI
+  ulInterToIntraRatioF: number; // 3GPP fractional power control f-factor (0.55 macro)
+  
+  // Detailed Calculation Results
+  calculatedDlInterferenceMarginDb: number; // Pure calculated DL margin from model
+  calculatedUlIotMarginDb: number;          // Pure calculated UL IoT margin from model
+  pessimisticMarginOffsetDb: number;       // User pessimistic add-on
+  effectiveDlInterferenceMarginDb: number; // calculated + pessimistic
+  effectiveUlIotMarginDb: number;          // calculated + pessimistic
+  geometryFactorDb: number;                // Serving-to-Interference geometry at cell edge (dB)
+  totalInrLinear: number;                  // Interference-to-Noise Ratio (I/N)
+  totalInrDb: number;
+  dlMaplImpactDb: number;
+  ulMaplImpactDb: number;
+}
+
+export interface OverheadSummary {
+  mode: OverheadMode;
+  frequencyRange: 'FR1' | 'FR2';
+  dlOverheadRatio: number; // e.g. 0.14 or calculated detailed ratio
+  ulOverheadRatio: number; // e.g. 0.08 or calculated detailed ratio
+  dlOverheadPercent: number; // e.g. 14.0%
+  ulOverheadPercent: number; // e.g. 8.0%
+  breakdown: {
+    ssbPercent: number;
+    pdcchPercent: number;
+    dmrsDlPercent: number;
+    csiRsPercent: number;
+    trsPercent: number;
+    ptrsDlPercent: number;
+    dmrsUlPercent: number;
+    pucchPercent: number;
+    srsPercent: number;
+    ptrsUlPercent: number;
+    csiRsCdmReductionPercent?: number; // % reduction in CSI-RS overhead achieved via orthogonal CDM codes
+  };
+  csiRsMultiplexing?: CsiRsMultiplexingType;
+  csiRsResourceType?: CsiRsResourceType;
+  csiRsPorts?: number;
 }
 
 export interface CarrierConfig {
@@ -66,6 +139,8 @@ export interface LinkBudgetInputs {
   customTddUlPercent?: number; // User Defined TDD UL ratio (%) when tddFrameRatio === 'CUSTOM' (e.g. 25%)
   band: string;
   bandwidthMHz: number;
+  subcarrierSpacingKhz?: number; // SCS in kHz (e.g. 15, 30, 60, 120)
+  frequencyMHz?: number; // Center frequency in MHz (auto-derived from band or editable)
   
   // Carrier Aggregation
   caEnabled: boolean;
@@ -82,6 +157,9 @@ export interface LinkBudgetInputs {
   mimoMode: MimoMode;
   bsHeightMeters: number; // e.g. 30m
   bsNoiseFigureDb: number; // e.g. 2.5 dB
+  bsMechanicalTiltDeg?: number; // Base station mechanical downtilt in degrees: -2° to 15° (default 2°)
+  bsElectricalTiltDeg?: number; // Base station electrical / RET downtilt in degrees: 0° to 14° (default 4°)
+  bsVerticalBeamwidthDeg?: number; // Base station antenna 3dB vertical beamwidth in degrees: 4° to 15° (default 7°)
   residualBlerTargetPercent?: number; // Target residual BLER: default 10% (can be set by user, e.g. 1% to 30%)
   dmrsSymbolsPerSlot?: number; // PDSCH/PUSCH DMRS symbols per slot: 1, 2, or 3 (default 1)
   numberOfBeams?: number; // Number of active beams: 1 to 8 (default 1)
@@ -112,7 +190,7 @@ export interface LinkBudgetInputs {
   coverageProbability: number; // e.g. 90%, 95%
   shadowFadingStdDevDb: number; // Log-normal fading std dev (e.g. 6 to 10 dB)
   shadowFadingMarginDb?: number; // Shadow Fading Margin (dB): user-defined or calculated from log-normal std dev (sigma) based on urban/rural environments
-  shadowFadingEnvironment?: 'RURAL' | 'SUBURBAN' | 'URBAN' | 'DENSE_URBAN' | 'CUSTOM'; // Environment profile for log-normal std dev
+  shadowFadingEnvironment?: 'RURAL' | 'SUBURBAN' | 'URBAN' | 'DENSE_URBAN' | 'TUNNEL' | 'CUSTOM'; // Environment profile for log-normal std dev
   dlFadingMarginDb?: number; // Downlink multipath/fast fading margin (e.g. 1.0 to 6.0 dB, default 2.0 dB)
   ulFadingMarginDb?: number; // Uplink multipath/fast fading margin (e.g. 1.0 to 6.0 dB, default 2.5 dB)
   interferenceMarginDb: number; // e.g. 2 to 4 dB
@@ -120,11 +198,41 @@ export interface LinkBudgetInputs {
   foliageLossDb: number;
   additionalPenetrationLossDb: number;
 
+  // Interference & Cell Loading Engine (3GPP TR 36.942 / TR 38.901 / ITU-R M.2412)
+  interferenceScenario?: InterferenceScenarioType; // 'NEIGHBORING_CELLS' (default) | 'ISOLATED_CELL'
+  interferenceHexTiers?: InterferenceHexLayoutTiers; // 1 (7 sites / 18 sectors) | 2 (19 sites / 54 sectors)
+  interferenceIsdMeters?: number; // Inter-Site Distance (m), editable (nominally 1.5 * cell range)
+  interferenceIsdMultiplier?: number; // ISD multiplier relative to Cell Range (default 1.5)
+  neighborCellLoadPercent?: number; // Average neighboring cell load factor [%]: 0% to 100% (default 50%)
+  intraCellLoadPercent?: number; // Current cell load factor [%]: 0% to 100% (default 50%)
+  interferenceMethod?: InterferenceMarginMethod; // Calculation formula / planning tool model
+  interferencePessimisticMarginDb?: number; // User-defined pessimistic safety margin added to calculated value (dB)
+  interferenceAutoSyncIsd?: boolean; // When true, ISD automatically scales with cell range * multiplier
+
   // Systems Overhead & Receiver Noise Figures (3GPP Rel-15/16/17)
   dlNoiseFigureDb?: number; // Noise figure in DL (dB): default 7 dB (user input)
   ulNoiseFigureDb?: number; // Noise figure in UL (dB): default 4 dB (user input)
   csiRsReportsPerPeriod?: number; // Number of CSI-RS reports within report period: 1 to 5
   csiRsCaPeriodicitySlots?: number; // CSI-RS for CA periodicity (slots): 10, 20, 40, 80
+
+  // 5G Overheads Configuration (3GPP TS 38.306 Table 4.1.2-1 & Detailed TS 38.211/38.214)
+  overheadMode?: OverheadMode; // '38306_DEFAULT' (default) | 'DETAILED'
+  customDlOverhead?: number; // Optional override e.g. 0.14
+  customUlOverhead?: number; // Optional override e.g. 0.08
+  pdcchCoresetSymbols?: number; // CORESET duration in symbols: 1, 2, or 3 (default 2)
+  dmrsConfigType?: DmrsConfigType; // 'TYPE_1' (6 REs/RB) | 'TYPE_2' (4 REs/RB) (default 'TYPE_1')
+  dmrsAdditionalPositions?: number; // 0, 1, 2, 3 (default 1)
+  csiRsEnabled?: boolean; // CSI-RS enabled (default true)
+  csiRsDensity?: number; // RE density: 0.5, 1, 3 RE/RB (default 1)
+  csiRsMultiplexing?: CsiRsMultiplexingType; // 3GPP TS 38.211 CDM Type: 'noCDM' | 'fd-CDM2' | 'cdm4-FD2-TD2' | 'cdm8-FD2-TD4'
+  csiRsResourceType?: CsiRsResourceType; // 'PERIODIC' | 'SEMI_PERSISTENT' | 'APERIODIC'
+  csiRsPorts?: number; // CSI-RS antenna ports: 1, 2, 4, 8, 16, 32 (default 4)
+  zpCsiRsRateMatching?: boolean; // PDSCH rate matching around Zero-Power CSI-RS (default true)
+  trsEnabled?: boolean; // Tracking Reference Signal (TRS) (default true)
+  trsPeriodicityMs?: number; // TRS periodicity: 10, 20, 40, 80 ms (default 20)
+  ptrsEnabled?: boolean; // Phase Tracking Reference Signal (PTRS, auto for FR2 mmWave)
+  ptrsTimeDensity?: number; // L_PTRS: 1, 2, 4 symbols (default 1)
+  ptrsFreqDensity?: number; // K_PTRS: 2, 4 RBs (default 2)
 
   // Receiver Sensitivity & Cell Edge Service (3GPP TS 38.101/104, TS 36.101/104, TS 26.114, TS 36.211, TS 22.179)
   serviceProfile?: ServiceProfileType; // Pull down menu: MBB_PS_DATA | VONR_5G | VOLTE_4G | NBIOT_4G | REDCAP_5G | MCX_PUBLIC_SAFETY
@@ -260,6 +368,20 @@ export interface LinkBudgetCalculationResult {
   // Systems Overhead (3GPP Rel-15/16/17/18 Control Channel Engineering)
   avgPdcchOverheadPercent: number; // Average PDCCH overhead (%): dynamic function of 3GPP parameters (can exceed 10%)
   avgPucchOverheadPercent: number; // Average PUCCH overhead (%): dynamic function of 3GPP parameters (can exceed 20%)
+  overheadSummary: OverheadSummary; // 3GPP TS 38.306 standard & detailed overhead breakdown
+
+  // Antenna Tilt & Coverage Geometry (3GPP TR 38.901 / TR 36.814)
+  antennaTiltSummary: {
+    mechanicalTiltDeg: number;
+    electricalTiltDeg: number;
+    totalTiltDeg: number;
+    verticalBeamwidthDeg: number;
+    mainBeamGroundDistanceMeters: number;
+    innerCoverageDistanceMeters: number;
+    outerCoverageDistanceMeters: number;
+    cellEdgePatternLossDb: number;
+    optimalTiltDeg: number;
+  };
 
   // Receiver Sensitivity 3GPP Breakdown (DL at UE side & UL at eNB/gNB side)
   rxSensitivityBreakdown: {
@@ -310,4 +432,7 @@ export interface LinkBudgetCalculationResult {
     calculatedEdgeRangeMeters: number;
     standardReference: string;
   };
+
+  // Interference Calculation Summary (3GPP TR 36.942 / TR 38.901 / ITU-R M.2412)
+  interferenceSummary: InterferenceCalculationSummary;
 }
