@@ -16,7 +16,8 @@ export function calculateInterferenceSummary(
   inputs: LinkBudgetInputs,
   cellRangeMeters: number,
   dlFreqMHz: number,
-  isMmWave: boolean
+  isMmWave: boolean,
+  requiredDlSinrDb: number = -4.5
 ): InterferenceCalculationSummary {
   const is5G = inputs.technology === '5G_SA' || inputs.technology === '5G_NSA';
   const scenario: InterferenceScenarioType = inputs.interferenceScenario ?? 'NEIGHBORING_CELLS';
@@ -176,6 +177,28 @@ export function calculateInterferenceSummary(
     }
   }
 
+  // DL interference margin tied to the cell-edge signal level (load-coupling form, used by every method).
+  // At the cell edge of a contiguous hexagonal layout (ISD = 1.5 R) the neighbour sectors arrive with about the same
+  // power as the serving one: neighbour-to-serving ratio F_edge ≈ +3.5 dB (two equidistant first-tier sectors plus
+  // the rest of tier 1), +3.8 dB with tier 2, scaled by (1.5 R / ISD)^3.5 for sparser grids. With I/S = η_DL·F_edge·G_iso,
+  // the SINR target γ is met at the edge when S/N = γ / (1 - η·F·G·γ), i.e. IM_DL = -10·log10(1 - η·F·G·γ).
+  const dlEdgeNeighbourToServingDb = Number((
+    (tiers === 1 ? 3.5 : 3.8) + 35 * Math.log10(1.5 / Math.max(0.6, normalizedIsdRatio))
+  ).toFixed(1));
+  const dlEdgeInterferenceToSignalRatio = scenario === 'ISOLATED_CELL'
+    ? 0
+    : (effectiveDlTrafficLoadPercent / 100) * Math.pow(10, dlEdgeNeighbourToServingDb / 10) * Math.pow(10, -beamformingIsolationDb / 10);
+  const xGamma = dlEdgeInterferenceToSignalRatio * Math.pow(10, requiredDlSinrDb / 10);
+  const dlInterferenceLimited = xGamma >= 0.95;
+  if (scenario !== 'ISOLATED_CELL') {
+    calculatedDlInterferenceMarginDb = Number((
+      (dlInterferenceLimited ? 13.0 : -10 * Math.log10(1 - xGamma)) + intraCellMimoLeakageDb * 0.2
+    ).toFixed(1));
+    totalInrLinear = Number((dlInterferenceLimited ? 19 : xGamma / (1 - xGamma)).toFixed(2));
+    geometryFactorDb = Number((beamformingIsolationDb - dlEdgeNeighbourToServingDb).toFixed(1));
+    methodFormula = `DL (all methods): IM_DL = -10·log10(1 - η_DL·F_edge·G_iso·γ_req) | UL from this method: ${methodFormula}`;
+  }
+
   // 4. Effective Margins with user pessimistic offset
   const effectiveDlInterferenceMarginDb = Number(
     Math.max(0, calculatedDlInterferenceMarginDb + pessimisticMarginOffsetDb).toFixed(1)
@@ -212,6 +235,9 @@ export function calculateInterferenceSummary(
     totalInrLinear,
     totalInrDb,
     dlMaplImpactDb: effectiveDlInterferenceMarginDb,
+    dlEdgeNeighbourToServingDb,
+    dlEdgeInterferenceToSignalRatio: Number(dlEdgeInterferenceToSignalRatio.toFixed(4)),
+    dlInterferenceLimited,
     ulMaplImpactDb: effectiveUlIotMarginDb
   };
 }

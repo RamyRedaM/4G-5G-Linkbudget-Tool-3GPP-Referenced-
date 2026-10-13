@@ -23,7 +23,9 @@ import {
   calculatePathLoss,
   calculateDistanceForPathLoss,
   calculateShadowFadingMargin,
-  getPropagationModelValidity
+  getPropagationModelValidity,
+  getTr38901ShadowFadingSigmaDb,
+  getPenetrationLossSigmaDb
 } from './spmPropagation';
 import { calculateInterferenceSummary } from './interferenceCalculator';
 
@@ -793,6 +795,26 @@ export const formatMcsLabel = (qm: number, codeRate: number, table: 1 | 2): stri
   return `MCS ${idx} (${modulationName(qm)} R=${r.toFixed(3)})`;
 };
 
+/**
+ * SNR (dB) needed to carry rateMbps on nSubcarriers, with the attenuated Shannon bound SE = α·log2(1 + SNR), α = 0.6
+ * (TR 36.942 Annex A). The spectral efficiency is floored at TS 38.214 MCS 0 (QPSK R=120/1024, 0.234 b/s/Hz) and
+ * capped at seMax; a rate above the cap returns the SNR of the cap (the allocation is then too small for the target).
+ */
+export function requiredSnrForRateDb(
+  rateMbps: number,
+  nSubcarriers: number,
+  scsKhz: number,
+  dutyCycle: number,
+  overheadRatio: number,
+  seMax: number
+): number {
+  const ALPHA = 0.6;
+  const SE_MIN = 2 * 120 / 1024;
+  const usableHz = Math.max(1, nSubcarriers) * scsKhz * 1e3 * Math.max(0.05, dutyCycle) * Math.max(0.05, 1 - overheadRatio);
+  const se = Math.min(seMax, Math.max(SE_MIN, (rateMbps * 1e6) / usableHz));
+  return Number((10 * Math.log10(Math.pow(2, se / ALPHA) - 1)).toFixed(1));
+}
+
 // Maximum transmission bandwidth configuration N_RB per channel bandwidth (MHz)
 // TS 38.101-1 Table 5.3.2-1 (FR1), TS 38.101-2 Table 5.3.2-1 (FR2), TS 36.101 Table 5.6-1 (LTE)
 const NR_FR1_NRB: Record<number, Record<number, number>> = {
@@ -867,8 +889,14 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
   // For multiple beams (1 to 8), narrow scanning beams concentrate RF energy: 10*log10(min(N_beams, 8))^0.4
   const numBeams = inputs.numberOfBeams ?? 1;
   const multiBeamGainDb = numBeams > 1 ? Number((10 * Math.log10(numBeams) * 0.45).toFixed(1)) : 0.0;
-  const dlBfGainDb = Number((mimoInfo.dlBfGainDb + multiBeamGainDb).toFixed(1));
-  const ulRxGainDb = Number((mimoInfo.ulRxGainDb + (numBeams > 1 ? multiBeamGainDb * 0.7 : 0)).toFixed(1));
+  // An AAU datasheet antenna gain is the beam gain of the whole array: it already contains the beamforming (array) gain.
+  // Then no beamforming gain is added on top in DL, and UL only adds dual-polarisation combining (2 branches, +3 dB).
+  // With an element / passive-panel gain the MIMO table's precoding and receive-combining gains are added.
+  const antennaGainIncludesArrayGain = inputs.bsAntennaGainIncludesArrayGain ?? (mimoInfo.isAau === true);
+  const dlBfGainDb = antennaGainIncludesArrayGain ? 0.0 : Number((mimoInfo.dlBfGainDb + multiBeamGainDb).toFixed(1));
+  const ulRxGainDb = antennaGainIncludesArrayGain
+    ? 3.0
+    : Number((mimoInfo.ulRxGainDb + (numBeams > 1 ? multiBeamGainDb * 0.7 : 0)).toFixed(1));
 
   // UE MIMO & Antenna Architecture (1T1R, 1T2R, 1T4R, 2T2R, 2T4R, 4T4R, 4T8R)
   // 3GPP 5G NR baseline for mid-band (n78/n77/n41) supports 2Tx UL MIMO (2T4R, 2 layers); 4G LTE baseline is 1Tx (1T2R)
@@ -932,6 +960,41 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
   // 7. Systems Overhead & Control Channels Calculation
   const controlOverheads = calculateControlOverheads(inputs);
 
+  // 7.6 Required SNR from the cell-edge target rate (data services: MBB and RedCap)
+  // The SNR must carry the target rate on the allocated PRBs, TDD share and overhead. Link performance follows the
+  // attenuated Shannon bound SE = α·log2(1 + SNR) with α = 0.6 (TR 36.942 Annex A), floored at the lowest MCS
+  // (TS 38.214 MCS index 0, QPSK R=120/1024) and capped at the highest one. In UL the number of PRBs is chosen to
+  // maximise the MAPL: more PRBs need less SNR but spread the UE power, which costs 10·log10(N_PRB) of noise.
+  if (serviceResolved.serviceProfile === 'MBB_PS_DATA' || serviceResolved.serviceProfile === 'REDCAP_5G') {
+    const linkOverhead = calculate5GOverhead(inputs, dlFreqMHz, inputs.bandwidthMHz, scsKhz, isMmWave);
+    const dlOverhead = is5G ? linkOverhead.dlOverheadRatio : Math.min(0.6, 0.143 + controlOverheads.avgPdcchOverheadPercent / 100);
+    const ulOverhead = is5G ? linkOverhead.ulOverheadRatio : Math.min(0.6, 2 / 14 + controlOverheads.avgPucchOverheadPercent / 100);
+    const dlSeMax = ((inputs.maxDlModulation || '256QAM') === '256QAM' ? 8 : 6) * (948 / 1024);
+    const ulSeMax = 6 * (948 / 1024);
+    const dlRate = serviceResolved.targetDlThroughputMbps;
+    const ulRate = serviceResolved.targetUlThroughputMbps;
+    if (inputs.dlRequiredSnrDb === undefined) {
+      serviceResolved.dlRequiredSnrDb = requiredSnrForRateDb(dlRate, serviceResolved.dlAllocatedSubcarriers, scsKhz, dlDutyCycle, dlOverhead, dlSeMax);
+    }
+    const ulPrbFixed = serviceResolved.serviceProfile === 'MBB_PS_DATA' && !!inputs.ulSubcarriersCount && inputs.ulSubcarriersCount > 0;
+    if (inputs.ulRequiredSnrDb === undefined) {
+      const maxUlPrbs = serviceResolved.serviceProfile === 'REDCAP_5G' ? Math.min(nPrbTotal, 51) : nPrbTotal;
+      let bestPrbs = Math.max(1, Math.round(serviceResolved.ulAllocatedSubcarriers / 12));
+      let bestSnr = requiredSnrForRateDb(ulRate, bestPrbs * 12, scsKhz, ulDutyCycle, ulOverhead, ulSeMax);
+      if (!ulPrbFixed) {
+        let bestScore = -Infinity;
+        for (let n = 1; n <= maxUlPrbs; n++) {
+          const snr = requiredSnrForRateDb(ulRate, n * 12, scsKhz, ulDutyCycle, ulOverhead, ulSeMax);
+          const score = -10 * Math.log10(n) - snr; // MAPL terms that depend on N_PRB
+          if (score > bestScore) { bestScore = score; bestPrbs = n; bestSnr = snr; }
+        }
+      }
+      serviceResolved.ulRequiredSnrDb = bestSnr;
+      serviceResolved.ulAllocatedPrbs = bestPrbs;
+      serviceResolved.ulAllocatedSubcarriers = bestPrbs * 12;
+    }
+  }
+
   // 8. Receiver Noise & 3GPP Sensitivities (TS 38.101-1 / TS 38.104 / TS 36.101 / TS 36.104)
   // Thermal Noise Power per Subcarrier (dBm/SC): P_thermal_sc = -174 + 10*log10(SCS_Hz)
   // 5G NR 30 kHz: -129.23 dBm/SC | 4G LTE / 15 kHz: -132.24 dBm/SC | mmWave 120 kHz: -123.21 dBm/SC
@@ -987,10 +1050,18 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
   // 9. Margins & 3GPP Interference Engine
   // Shadow Fading Margin based on log-normal fading standard deviation (sigma) and coverage probability
   // M_SF = z * sigma_SF (or user direct input from Link Budget Configuration panel)
+  // σ: TR 38.901 Table 7.4.1-1 (with O2I σ_P for indoor / in-car users) for the 3GPP models unless the user set it
+  const tr38901Sigma = getTr38901ShadowFadingSigmaDb(inputs.propagationModel, inputs.indoorOutdoorScenario);
+  const sigmaMode = inputs.shadowFadingSigmaMode ?? (tr38901Sigma !== null ? 'AUTO_TR38901' : 'MANUAL');
+  const useTr38901Sigma = sigmaMode === 'AUTO_TR38901' && tr38901Sigma !== null;
+  const effectiveShadowFadingStdDevDb = useTr38901Sigma ? tr38901Sigma : inputs.shadowFadingStdDevDb;
+  const shadowFadingSigmaSource = useTr38901Sigma
+    ? `TR 38.901 Table 7.4.1-1 (${inputs.propagationModel.replace('3GPP_', '')}, ${inputs.indoorOutdoorScenario.replace(/_/g, ' ').toLowerCase()}${getPenetrationLossSigmaDb(inputs.indoorOutdoorScenario) > 0 ? ', incl. O2I σ_P' : ''})`
+    : 'User input';
   const shadowFadingMarginDb = (inputs.shadowFadingMarginDb !== undefined && inputs.shadowFadingMarginDb !== null && !isNaN(inputs.shadowFadingMarginDb))
     ? Number(inputs.shadowFadingMarginDb)
     : calculateShadowFadingMargin(
-        inputs.shadowFadingStdDevDb,
+        effectiveShadowFadingStdDevDb,
         inputs.coverageProbability
       );
 
@@ -1014,7 +1085,7 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
     foliageLossDb: inputs.foliageLossDb,
     spmK1Override: inputs.spmK1,
     spmK2Override: inputs.spmK2,
-    shadowFadingStdDevDb: inputs.shadowFadingStdDevDb,
+    shadowFadingStdDevDb: effectiveShadowFadingStdDevDb,
     coverageProbability: inputs.coverageProbability
   });
   const tentativeCellRangeMeters = Math.max(100, Math.round(tentativeRangeKm * 1000));
@@ -1024,18 +1095,15 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
     inputs,
     tentativeCellRangeMeters,
     dlFreqMHz,
-    isMmWave
+    isMmWave,
+    dlTargetSinrCellEdgeDb
   );
 
-  // Use the effective calculated interference margins (which factor in scenario, layout tiers, loading, 4G CRS vs 5G beamforming, and pessimistic offsets)
-  // or explicit direct input if given
-  const effectiveDlInterferenceMarginDb = (inputs.interferenceScenario !== undefined)
-    ? interferenceSummary.effectiveDlInterferenceMarginDb
-    : Number((inputs.interferenceMarginDb ?? 3.0).toFixed(1));
-
-  const effectiveUlIotMarginDb = (inputs.interferenceScenario !== undefined)
-    ? interferenceSummary.effectiveUlIotMarginDb
-    : Number((inputs.iotMarginDb ?? 3.0).toFixed(1));
+  // Interference margins from the interference engine (scenario, layout tiers, loading, 4G CRS vs 5G beamforming,
+  // pessimistic offset). Without a saved scenario the engine runs with its default (neighbouring cells), which is also
+  // what the interference panel shows; the DL margin depends on the cell-edge SINR target.
+  const effectiveDlInterferenceMarginDb = interferenceSummary.effectiveDlInterferenceMarginDb;
+  const effectiveUlIotMarginDb = interferenceSummary.effectiveUlIotMarginDb;
 
   const totalDlMarginsDb = Number((shadowFadingMarginDb + effectiveDlInterferenceMarginDb + dlFadingMarginDb).toFixed(1));
   const totalUlMarginsDb = Number((shadowFadingMarginDb + effectiveUlIotMarginDb + ulFadingMarginDb).toFixed(1));
@@ -1076,12 +1144,20 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
     foliageLossDb: inputs.foliageLossDb,
     spmK1Override: inputs.spmK1,
     spmK2Override: inputs.spmK2,
-    shadowFadingStdDevDb: inputs.shadowFadingStdDevDb,
+    shadowFadingStdDevDb: effectiveShadowFadingStdDevDb,
     coverageProbability: inputs.coverageProbability
   };
 
   const maxCellRangeKm = Number(calculateDistanceForPathLoss(systemMaplDb, propParams).toFixed(3));
   const maxCellRangeMeters = Math.round(maxCellRangeKm * 1000);
+
+  if (interferenceSummary.dlInterferenceLimited) {
+    configWarnings.push(
+      `DL is interference-limited: at ${interferenceSummary.effectiveDlTrafficLoadPercent}% load the neighbour cells leave a cell-edge SINR ` +
+      `below the ${dlTargetSinrCellEdgeDb} dB required, whatever the signal level. The DL interference margin is capped at 13 dB; ` +
+      `lower the load, raise the ISD or use a service with a lower SINR target.`
+    );
+  }
 
   // Propagation model validity: the range is capped where the model stops being defined
   const modelValidity = getPropagationModelValidity(inputs.propagationModel, inputs.indoorOutdoorScenario);
@@ -1270,18 +1346,28 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
   // Capped by the transmitter EVM limit (TS 38.104 / TS 36.104 Table 6.5.2-1: 3.5% for 256QAM, 8% for 64QAM)
   const dlSinrCeilingDb = maxDlMod === '256QAM' ? 29.1 : 21.9;
   const ulSinrCeilingDb = 21.9;
-  const dlSinrAtPl = (pl: number) => Number(Math.min(dlSinrCeilingDb,
-    bsEirpDbm + inputs.ueAntennaGainDbi - inputs.bodyLossDb - pl + ueRxDiversityGainDb
-    - ueThermalNoiseFloorDbm - effectiveDlInterferenceMarginDb - shadowFadingMarginDb - dlFadingMarginDb
-  ).toFixed(1));
+  // DL interference relative to the serving signal grows towards the cell edge: I/S(d) = x_edge·(d / R)^3.5, with
+  // x_edge = η·F_edge·G_iso from the interference engine.
+  const dlEdgeIs: number | null = interferenceSummary.dlEdgeInterferenceToSignalRatio ?? null;
+  const dlSinrAtPl = (pl: number, distKm: number) => {
+    const snrNoInterference = bsEirpDbm + inputs.ueAntennaGainDbi - inputs.bodyLossDb - pl + ueRxDiversityGainDb
+      - ueThermalNoiseFloorDbm - shadowFadingMarginDb - dlFadingMarginDb;
+    const sinr = dlEdgeIs === null
+      ? snrNoInterference - effectiveDlInterferenceMarginDb
+      : -10 * Math.log10(
+          Math.pow(10, -(snrNoInterference - interferenceSummary.pessimisticMarginOffsetDb) / 10)
+          + dlEdgeIs * Math.pow(Math.min(1.5, distKm / Math.max(0.001, maxCellRangeKm)), 3.5)
+        );
+    return Number(Math.min(dlSinrCeilingDb, sinr).toFixed(1));
+  };
   const ulSinrAtPl = (pl: number) => Number(Math.min(ulSinrCeilingDb,
     ueEirpDbm + inputs.bsAntennaGainDbi - inputs.bsFeederCableLossDb - pl + ulRxGainDb
     - bsThermalNoiseFloorDbm - effectiveUlIotMarginDb - shadowFadingMarginDb - ulFadingMarginDb
   ).toFixed(1));
-  const sinrNear = dlSinrAtPl(plNear);
-  const sinrMed = dlSinrAtPl(plMed);
-  const sinrBad = dlSinrAtPl(plBad);
-  const sinrEdge = dlSinrAtPl(plEdge);
+  const sinrNear = dlSinrAtPl(plNear, distNearKm);
+  const sinrMed = dlSinrAtPl(plMed, distMedKm);
+  const sinrBad = dlSinrAtPl(plBad, distBadKm);
+  const sinrEdge = dlSinrAtPl(plEdge, distEdgeKm);
   const ulSinrNear = ulSinrAtPl(plNear);
   const ulSinrMed = ulSinrAtPl(plMed);
   const ulSinrBad = ulSinrAtPl(plBad);
@@ -1594,7 +1680,7 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
       ulValue: `${shadowFadingMarginDb.toFixed(1)} dB (P=${inputs.coverageProbability}%)`,
       unit: 'dB',
       category: 'MARGINS',
-      description: `Log-normal slow fading margin derived from urban/rural σ=${inputs.shadowFadingStdDevDb.toFixed(1)} dB at ${inputs.coverageProbability}% cell edge probability`
+      description: `Log-normal slow fading margin derived from urban/rural σ=${effectiveShadowFadingStdDevDb.toFixed(1)} dB at ${inputs.coverageProbability}% cell edge probability`
     },
     {
       name: 'Multipath / Fast Fading Margin',
@@ -1660,6 +1746,8 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
     fourPoints,
     maxCellRangeCapped,
     configWarnings,
+    effectiveShadowFadingStdDevDb,
+    shadowFadingSigmaSource,
     cascadeTable,
     caSummary: {
       totalBandwidthMHz: totalAggBwMHz,

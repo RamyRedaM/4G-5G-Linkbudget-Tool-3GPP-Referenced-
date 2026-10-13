@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { PathLossDiagnosticsPanel } from './PathLossDiagnosticsPanel';
+import { getTr38901ShadowFadingSigmaDb } from '../utils/spmPropagation';
 import { LinkBudgetCalculationResult, LinkBudgetInputs } from '../types/telecom';
 import {
   UeClassConfig,
@@ -16,6 +17,7 @@ import {
 import {
   generateBins,
   executeMonteCarloSimulation,
+  getMonteCarloOutdoorScenario,
   executeSelfTests,
   getAssumptionsCatalog,
   DEFAULT_SERVICE_CATALOGUE,
@@ -616,8 +618,10 @@ export const MonteCarloAnalysis: React.FC<MonteCarloAnalysisProps> = ({ result, 
                   <input
                     type="number"
                     step="0.5"
-                    value={scenarioInputs.shadowFadingStdDevDb}
-                    onChange={(e) => setScenarioInputs(prev => ({ ...prev, shadowFadingStdDevDb: Number(e.target.value) }))}
+                    value={scenarioInputs.shadowFadingSigmaMode === 'MANUAL'
+                      ? scenarioInputs.shadowFadingStdDevDb
+                      : (getTr38901ShadowFadingSigmaDb(scenarioInputs.propagationModel, getMonteCarloOutdoorScenario(scenarioInputs.indoorOutdoorScenario)) ?? scenarioInputs.shadowFadingStdDevDb)}
+                    onChange={(e) => setScenarioInputs(prev => ({ ...prev, shadowFadingStdDevDb: Number(e.target.value), shadowFadingSigmaMode: 'MANUAL' }))}
                     className="w-full bg-slate-950 border border-slate-700 rounded p-1.5 text-xs text-white"
                   />
                   <span className="text-slate-400">dB</span>

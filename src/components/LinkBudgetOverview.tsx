@@ -77,7 +77,7 @@ export const LinkBudgetOverview: React.FC<LinkBudgetOverviewProps> = ({ result, 
             </div>
             <div className="flex justify-between pt-0.5 border-t border-slate-800/50 text-[10px] text-slate-400">
               <span>Shadow Fading Margin:</span>
-              <span className="text-cyan-300 font-medium">+{result.shadowFadingMarginDb.toFixed(1)} dB (σ={inputs.shadowFadingStdDevDb.toFixed(1)} dB)</span>
+              <span className="text-cyan-300 font-medium">+{result.shadowFadingMarginDb.toFixed(1)} dB (σ={(result.effectiveShadowFadingStdDevDb ?? inputs.shadowFadingStdDevDb).toFixed(1)} dB)</span>
             </div>
           </div>
         </div>

@@ -93,6 +93,9 @@ export interface InterferenceCalculationSummary {
   totalInrLinear: number;                  // Interference-to-Noise Ratio (I/N)
   totalInrDb: number;
   dlMaplImpactDb: number;
+  dlEdgeNeighbourToServingDb?: number; // neighbour-to-serving power ratio at the cell edge, full load (before beamforming isolation)
+  dlEdgeInterferenceToSignalRatio?: number; // η_DL · F_edge · G_iso (linear): I/S at the cell edge at the current load
+  dlInterferenceLimited?: boolean; // required DL SINR not reachable at the cell edge at this load
   ulMaplImpactDb: number;
 }
 
@@ -189,6 +192,8 @@ export interface LinkBudgetInputs {
   // Margins
   coverageProbability: number; // e.g. 90%, 95%
   shadowFadingStdDevDb: number; // Log-normal fading std dev (e.g. 6 to 10 dB)
+  shadowFadingSigmaMode?: 'AUTO_TR38901' | 'MANUAL'; // AUTO: σ from TR 38.901 Table 7.4.1-1 for 3GPP models (default for them)
+  bsAntennaGainIncludesArrayGain?: boolean; // true: BS antenna gain is the AAU beam gain (includes array gain); default true for AAU configs
   shadowFadingMarginDb?: number; // Shadow Fading Margin (dB): user-defined or calculated from log-normal std dev (sigma) based on urban/rural environments
   shadowFadingEnvironment?: 'RURAL' | 'SUBURBAN' | 'URBAN' | 'DENSE_URBAN' | 'TUNNEL' | 'CUSTOM'; // Environment profile for log-normal std dev
   dlFadingMarginDb?: number; // Downlink multipath/fast fading margin (e.g. 1.0 to 6.0 dB, default 2.0 dB)
@@ -436,6 +441,8 @@ export interface LinkBudgetCalculationResult {
 
   // Interference Calculation Summary (3GPP TR 36.942 / TR 38.901 / ITU-R M.2412)
   interferenceSummary: InterferenceCalculationSummary;
+  effectiveShadowFadingStdDevDb?: number; // σ actually used for the shadow fading margin
+  shadowFadingSigmaSource?: string; // where σ came from (TR 38.901 table or user input)
   maxCellRangeCapped?: boolean; // true when R_max is limited by the propagation model validity range
   configWarnings?: string[]; // configuration warnings (undefined bandwidth / SCS, model range cap)
 }

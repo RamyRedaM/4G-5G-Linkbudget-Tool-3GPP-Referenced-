@@ -20,7 +20,7 @@ import {
   PathLossDiagnostics,
   PathLossDiagnosticBin
 } from '../types/monteCarlo';
-import { calculatePathLoss, getBuildingPenetrationLoss, PropagationParams } from './spmPropagation';
+import { calculatePathLoss, getBuildingPenetrationLoss, getTr38901ShadowFadingSigmaDb, PropagationParams } from './spmPropagation';
 import { calculateLinkBudget } from './linkBudgetCalculator';
 import { TELECOM_BANDS } from '../data/telecomBands';
 
@@ -347,7 +347,7 @@ export function calculateMonteCarloMedianPathLoss(distKm: number, inputs: LinkBu
  */
 export function getLkbScenarioPenetrationDb(inputs: LinkBudgetInputs): number {
   const band = TELECOM_BANDS.find(b => b.band === inputs.band) || TELECOM_BANDS[0];
-  return getBuildingPenetrationLoss(inputs.indoorOutdoorScenario, band.dlFreqMHz);
+  return getBuildingPenetrationLoss(inputs.indoorOutdoorScenario, band.dlFreqMHz, inputs.propagationModel);
 }
 
 // ====================================================
@@ -634,7 +634,11 @@ function runMonteCarloCore(
   const bandInfo = TELECOM_BANDS.find(b => b.band === lkbInputs.band) || TELECOM_BANDS[0];
   const dlFreqMHz = bandInfo.dlFreqMHz;
   const ulFreqMHz = bandInfo.ulFreqMHz || dlFreqMHz;
-  const sigmaSf = lkbInputs.shadowFadingStdDevDb ?? 8.0;
+  // Shadowing σ of the users' outdoor propagation state: TR 38.901 table value in AUTO mode, else the user's σ
+  const autoOutdoorSigma = getTr38901ShadowFadingSigmaDb(lkbInputs.propagationModel, getMonteCarloOutdoorScenario(lkbInputs.indoorOutdoorScenario));
+  const sigmaSf = (lkbInputs.shadowFadingSigmaMode ?? (autoOutdoorSigma !== null ? 'AUTO_TR38901' : 'MANUAL')) === 'AUTO_TR38901' && autoOutdoorSigma !== null
+    ? autoOutdoorSigma
+    : (lkbInputs.shadowFadingStdDevDb ?? 8.0);
   const lkbBodyLossDb = lkbInputs.bodyLossDb ?? 3.0;
   const lkbPropParams = buildLkbPropagationParams(lkbInputs, dlFreqMHz);
   const lkbScenarioPenetrationDb = getLkbScenarioPenetrationDb(lkbInputs);

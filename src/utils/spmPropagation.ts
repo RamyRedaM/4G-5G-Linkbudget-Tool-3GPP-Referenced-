@@ -67,29 +67,74 @@ export function calculateStdDevFromMargin(
   return Number((Math.max(0, marginDb) / z).toFixed(2));
 }
 
-export function getBuildingPenetrationLoss(scenario: IndoorOutdoorScenario, freqMHz: number): number {
-  const fGhz = Math.max(0.7, freqMHz / 1000);
+/**
+ * Outdoor-to-indoor / in-car penetration loss (dB), TR 38.901 §7.4.3 (mean values):
+ * - INDOOR_STANDARD: low-loss O2I model, PL_tw = 5 - 10·log10(0.3·10^(-L_glass/10) + 0.7·10^(-L_concrete/10))
+ * - INDOOR_DEEP:     high-loss O2I model, PL_tw = 5 - 10·log10(0.7·10^(-L_IIRglass/10) + 0.3·10^(-L_concrete/10))
+ *   with L_glass = 2 + 0.2·f, L_IIRglass = 23 + 0.3·f, L_concrete = 5 + 4·f (f in GHz),
+ *   plus indoor loss PL_in = 0.5·d_2D-in, d_2D-in = min of two U(0, 25 m) (U(0, 10 m) for RMa), mean 25/3 m (10/3 m).
+ * - IN_VEHICLE: car penetration loss, mean 9 dB (§7.4.3.2)
+ * - TUNNEL_COVERAGE: not modelled by TR 38.901; portal / aperture coupling loss from industry studies.
+ */
+export function getBuildingPenetrationLoss(
+  scenario: IndoorOutdoorScenario,
+  freqMHz: number,
+  model?: PropagationModelType
+): number {
+  const fGhz = Math.max(0.5, freqMHz / 1000);
+  const lGlass = 2 + 0.2 * fGhz;
+  const lIirGlass = 23 + 0.3 * fGhz;
+  const lConcrete = 5 + 4 * fGhz;
+  const meanIndoorDistanceM = model === '3GPP_RMA' ? 10 / 3 : 25 / 3;
+  const plIn = 0.5 * meanIndoorDistanceM;
   switch (scenario) {
     case 'OUTDOOR_LOS':
-      return 0.0;
     case 'OUTDOOR_NLOS':
       return 0.0;
     case 'IN_VEHICLE':
-      // 3GPP vehicle penetration: 9 dB + 0.5 * f_GHz
-      return 8.0 + Math.min(6.0, 0.5 * fGhz);
+      return 9.0;
     case 'INDOOR_STANDARD':
-      // Standard residential/office (plasterboard, standard glass) ~ 12-16 dB
-      return 12.0 + Math.min(8.0, 1.2 * Math.log10(fGhz + 1));
+      return 5 - 10 * Math.log10(0.3 * Math.pow(10, -lGlass / 10) + 0.7 * Math.pow(10, -lConcrete / 10)) + plIn;
+    case 'INDOOR_DEEP':
+      return 5 - 10 * Math.log10(0.7 * Math.pow(10, -lIirGlass / 10) + 0.3 * Math.pow(10, -lConcrete / 10)) + plIn;
     case 'TUNNEL_COVERAGE':
       // Inside Tunnel Coverage: portal penetration & entrance transition coupling loss (~18-24 dB)
       // 3GPP TR 38.901 HST In-Tunnel, ITU-R P.1411 & CommScope/RFS radiating cable / portal studies
       return 18.0 + Math.min(6.0, 2.2 * Math.log10(fGhz + 1));
-    case 'INDOOR_DEEP':
-      // Deep indoor / high-loss commercial (thermal IRR glass, reinforced concrete) ~ 22-30 dB
-      return 22.0 + Math.min(10.0, 2.5 * Math.log10(fGhz + 1));
     default:
       return 0.0;
   }
+}
+
+/** Standard deviation of the penetration loss (dB): TR 38.901 §7.4.3 σ_P (low-loss 4.4, high-loss 6.5, car 5). */
+export function getPenetrationLossSigmaDb(scenario: IndoorOutdoorScenario): number {
+  switch (scenario) {
+    case 'INDOOR_STANDARD': return 4.4;
+    case 'INDOOR_DEEP': return 6.5;
+    case 'IN_VEHICLE': return 5.0;
+    default: return 0.0;
+  }
+}
+
+/**
+ * Shadow fading standard deviation from TR 38.901 Table 7.4.1-1 for the 3GPP models (null for SPM / Hata / FSPL):
+ * UMa LOS 4 / NLOS 6 dB, UMi LOS 4 / NLOS 7.82 dB, RMa LOS 6 dB (beyond the breakpoint; 4 dB before it) / NLOS 8 dB.
+ * Indoor and in-car users take the NLOS value combined with the penetration-loss σ_P: σ = sqrt(σ_SF² + σ_P²).
+ */
+export function getTr38901ShadowFadingSigmaDb(
+  model: PropagationModelType,
+  scenario: IndoorOutdoorScenario
+): number | null {
+  const isLos = scenario === 'OUTDOOR_LOS';
+  let sigmaSf: number;
+  switch (model) {
+    case '3GPP_UMA': sigmaSf = isLos ? 4.0 : 6.0; break;
+    case '3GPP_UMI': sigmaSf = isLos ? 4.0 : 7.82; break;
+    case '3GPP_RMA': sigmaSf = isLos ? 6.0 : 8.0; break;
+    default: return null;
+  }
+  const sigmaP = getPenetrationLossSigmaDb(scenario);
+  return Number(Math.sqrt(sigmaSf * sigmaSf + sigmaP * sigmaP).toFixed(2));
 }
 
 export function getClutterOffsetDb(clutter: EnvironmentClutter): number {
@@ -264,7 +309,7 @@ export function calculatePathLoss(
   }
 
   // Add environment scenarios: building penetration, foliage, additional planning margin
-  const penetrationLoss = getBuildingPenetrationLoss(params.scenario, fMhz);
+  const penetrationLoss = getBuildingPenetrationLoss(params.scenario, fMhz, params.model);
   const foliageLoss = params.foliageLossDb ?? 0;
   const extraLoss = params.additionalPenetrationLossDb ?? 0;
 

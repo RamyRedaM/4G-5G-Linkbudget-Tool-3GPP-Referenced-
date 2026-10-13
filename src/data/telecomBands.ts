@@ -1349,14 +1349,15 @@ export const TDD_FRAME_PATTERNS = [
   { id: 'CUSTOM', label: 'Customized TDD Frame Ratio (User Defined)', dlRatio: 0.75, ulRatio: 0.25, slotPeriodMs: 2.5 }
 ];
 
-export const MIMO_CONFIGS: Record<string, { dlLayers: number; ulLayers: number; dlBfGainDb: number; ulRxGainDb: number; desc: string }> = {
+// isAau: active antenna unit; its datasheet antenna gain is the beam gain and already includes the array gain
+export const MIMO_CONFIGS: Record<string, { dlLayers: number; ulLayers: number; dlBfGainDb: number; ulRxGainDb: number; desc: string; isAau?: boolean }> = {
   'SISO': { dlLayers: 1, ulLayers: 1, dlBfGainDb: 0, ulRxGainDb: 0, desc: 'Single-Input Single-Output' },
   '2x2': { dlLayers: 2, ulLayers: 2, dlBfGainDb: 0, ulRxGainDb: 3.0, desc: '2T2R Conventional Cross-Pol' },
   '4x4': { dlLayers: 4, ulLayers: 4, dlBfGainDb: 3.0, ulRxGainDb: 6.0, desc: '4T4R Spatial Multiplexing' },
   '8x8': { dlLayers: 4, ulLayers: 4, dlBfGainDb: 6.0, ulRxGainDb: 7.5, desc: '8T8R Sectorized / Multi-layer' },
-  '16TR': { dlLayers: 4, ulLayers: 4, dlBfGainDb: 6.0, ulRxGainDb: 8.0, desc: '16TR Lightweight Massive MIMO' },
-  '32TR': { dlLayers: 4, ulLayers: 4, dlBfGainDb: 9.0, ulRxGainDb: 10.5, desc: '32TR Massive MIMO AAU' },
-  '64TR': { dlLayers: 4, ulLayers: 4, dlBfGainDb: 12.0, ulRxGainDb: 12.5, desc: '64TR High-Density Massive MIMO AAU (Full 3D Beamforming)' }
+  '16TR': { dlLayers: 4, ulLayers: 4, dlBfGainDb: 6.0, ulRxGainDb: 8.0, desc: '16TR Lightweight Massive MIMO', isAau: true },
+  '32TR': { dlLayers: 4, ulLayers: 4, dlBfGainDb: 9.0, ulRxGainDb: 10.5, desc: '32TR Massive MIMO AAU', isAau: true },
+  '64TR': { dlLayers: 4, ulLayers: 4, dlBfGainDb: 12.0, ulRxGainDb: 12.5, desc: '64TR High-Density Massive MIMO AAU (Full 3D Beamforming)', isAau: true }
 };
 
 export const POPULAR_CA_COMBOS = [

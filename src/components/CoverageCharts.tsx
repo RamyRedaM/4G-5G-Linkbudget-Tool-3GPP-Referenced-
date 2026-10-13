@@ -191,7 +191,7 @@ export const CoverageCharts: React.FC<CoverageChartsProps> = ({ result, inputs }
             const minPl = 50;
             const maxPl = Math.max(165, result.systemMaplDb + 18);
             const getY = (val: number) => margin.top + chartH - ((val - minPl) / (maxPl - minPl)) * chartH;
-            const sigma = inputs.shadowFadingStdDevDb;
+            const sigma = result.effectiveShadowFadingStdDevDb ?? inputs.shadowFadingStdDevDb;
             const msf = result.shadowFadingMarginDb;
 
             // Nominal SPM Curve
@@ -443,7 +443,7 @@ export const CoverageCharts: React.FC<CoverageChartsProps> = ({ result, inputs }
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="w-3 h-2 bg-cyan-500/20 border border-dashed border-cyan-400/50 inline-block rounded-xs" />
-                  <span>Shadow Fading Envelope (±σ: ±{inputs.shadowFadingStdDevDb.toFixed(1)} dB)</span>
+                  <span>Shadow Fading Envelope (±σ: ±{(result.effectiveShadowFadingStdDevDb ?? inputs.shadowFadingStdDevDb).toFixed(1)} dB)</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="w-3 h-0.5 bg-amber-400 border-b border-dashed inline-block" />

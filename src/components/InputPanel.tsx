@@ -26,7 +26,7 @@ import {
   InterferenceHexLayoutTiers,
   InterferenceMarginMethod
 } from '../types/telecom';
-import { TELECOM_BANDS, TDD_FRAME_PATTERNS, POPULAR_CA_COMBOS } from '../data/telecomBands';
+import { TELECOM_BANDS, TDD_FRAME_PATTERNS, POPULAR_CA_COMBOS, MIMO_CONFIGS } from '../data/telecomBands';
 import {
   Radio,
   Sliders,
@@ -56,7 +56,8 @@ import {
   calculateShadowFadingMargin,
   calculateStdDevFromMargin,
   getGaussianZ,
-  getBuildingPenetrationLoss
+  getBuildingPenetrationLoss,
+  getTr38901ShadowFadingSigmaDb
 } from '../utils/spmPropagation';
 
 interface InputPanelProps {
@@ -73,8 +74,15 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
   const is5G = inputs.technology !== '4G';
 
   const update = (partial: Partial<LinkBudgetInputs>) => {
-    onChange({ ...inputs, ...partial });
+    // A σ set by hand overrides the TR 38.901 table value
+    const sigmaManual = 'shadowFadingStdDevDb' in partial && !('shadowFadingSigmaMode' in partial)
+      ? { shadowFadingSigmaMode: 'MANUAL' as const }
+      : {};
+    onChange({ ...inputs, ...partial, ...sigmaManual });
   };
+  // σ actually used by the link budget (TR 38.901 table in AUTO mode, else the user's value)
+  const sigmaEff = lbResult.effectiveShadowFadingStdDevDb ?? inputs.shadowFadingStdDevDb;
+  const tr38901SigmaAvailable = getTr38901ShadowFadingSigmaDb(inputs.propagationModel, inputs.indoorOutdoorScenario) !== null;
 
   const handleServiceProfileChange = (newProfile: ServiceProfileType) => {
     switch (newProfile) {
@@ -3029,6 +3037,19 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                 <span>18 dBi (Macro)</span>
                 <span>24.5 dBi (Massive MIMO AAU)</span>
               </div>
+              <label className="flex items-start gap-2 mt-2 text-[11px] text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 accent-cyan-400"
+                  checked={inputs.bsAntennaGainIncludesArrayGain ?? (MIMO_CONFIGS[inputs.mimoMode]?.isAau === true)}
+                  onChange={(e) => update({ bsAntennaGainIncludesArrayGain: e.target.checked })}
+                />
+                <span>
+                  Gain is the AAU beam gain (includes the array / beamforming gain, as on AAU datasheets).
+                  Untick for an element or passive-panel gain: the MIMO beamforming and Rx combining gains are then added.
+                  <span className="block text-slate-500 font-mono mt-0.5">BS EIRP: {lbResult.bsEirpDbm.toFixed(1)} dBm</span>
+                </span>
+              </label>
             </div>
 
             {/* Feeder & Cable Losses */}
@@ -3779,10 +3800,10 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
               >
                 <option value="OUTDOOR_LOS">Pure Outdoor LOS (0 dB Penetration)</option>
                 <option value="OUTDOOR_NLOS">Pure Outdoor NLOS (Clutter Shadowing)</option>
-                <option value="IN_VEHICLE">In-Vehicle Penetration (~8-10 dB)</option>
-                <option value="INDOOR_STANDARD">Indoor Standard Glass/Plaster (~12-16 dB)</option>
+                <option value="IN_VEHICLE">In-Vehicle (TR 38.901 car penetration, 9 dB)</option>
+                <option value="INDOOR_STANDARD">Indoor, low-loss building (TR 38.901 O2I: {getBuildingPenetrationLoss('INDOOR_STANDARD', selectedBandInfo?.dlFreqMHz || 2100, inputs.propagationModel).toFixed(1)} dB)</option>
                 <option value="TUNNEL_COVERAGE">Inside Tunnel Coverage (~18-24 dB)</option>
-                <option value="INDOOR_DEEP">Deep Indoor / Low-E Glass & Concrete (~22-28 dB)</option>
+                <option value="INDOOR_DEEP">Deep indoor, high-loss building (TR 38.901 O2I: {getBuildingPenetrationLoss('INDOOR_DEEP', selectedBandInfo?.dlFreqMHz || 2100, inputs.propagationModel).toFixed(1)} dB)</option>
               </select>
             </div>
           </div>
@@ -3838,7 +3859,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                           });
                         }}
                         className={`text-[9px] px-2 py-1 rounded border transition-all ${
-                          Math.abs(inputs.shadowFadingStdDevDb - 5.5) < 0.2
+                          Math.abs(sigmaEff - 5.5) < 0.2
                             ? 'bg-cyan-900 border-cyan-400 text-cyan-200'
                             : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-cyan-600'
                         }`}
@@ -3856,7 +3877,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                           });
                         }}
                         className={`text-[9px] px-2 py-1 rounded border transition-all ${
-                          Math.abs(inputs.shadowFadingStdDevDb - 3.0) < 0.2
+                          Math.abs(sigmaEff - 3.0) < 0.2
                             ? 'bg-cyan-900 border-cyan-400 text-cyan-200'
                             : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-cyan-600'
                         }`}
@@ -3882,7 +3903,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
 
           {/* Log-Normal Shadow Fading & Margins Panel */}
           {(() => {
-            const calculatedMargin = calculateShadowFadingMargin(inputs.shadowFadingStdDevDb, inputs.coverageProbability);
+            const calculatedMargin = calculateShadowFadingMargin(sigmaEff, inputs.coverageProbability);
             const currentMargin = (inputs.shadowFadingMarginDb !== undefined && inputs.shadowFadingMarginDb !== null && !isNaN(inputs.shadowFadingMarginDb))
               ? inputs.shadowFadingMarginDb
               : calculatedMargin;
@@ -3927,11 +3948,11 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
             ];
 
             const activeEnv = inputs.shadowFadingEnvironment ?? (
-              Math.abs(inputs.shadowFadingStdDevDb - 5.5) < 0.2 ? 'TUNNEL' :
-              Math.abs(inputs.shadowFadingStdDevDb - 6.0) < 0.2 ? 'RURAL' :
-              Math.abs(inputs.shadowFadingStdDevDb - 7.0) < 0.2 ? 'SUBURBAN' :
-              Math.abs(inputs.shadowFadingStdDevDb - 8.5) < 0.2 ? 'URBAN' :
-              Math.abs(inputs.shadowFadingStdDevDb - 10.0) < 0.2 ? 'DENSE_URBAN' : 'CUSTOM'
+              Math.abs(sigmaEff - 5.5) < 0.2 ? 'TUNNEL' :
+              Math.abs(sigmaEff - 6.0) < 0.2 ? 'RURAL' :
+              Math.abs(sigmaEff - 7.0) < 0.2 ? 'SUBURBAN' :
+              Math.abs(sigmaEff - 8.5) < 0.2 ? 'URBAN' :
+              Math.abs(sigmaEff - 10.0) < 0.2 ? 'DENSE_URBAN' : 'CUSTOM'
             );
 
             return (
@@ -3946,6 +3967,20 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                     <p className="text-[11px] text-slate-400 mt-0.5">
                       Defines log-normal standard deviation (σ_SF) based on urban/rural clutter environments, deriving the Shadow Fading Margin (M_SF = z·σ) which directly deducts from MAPL.
                     </p>
+                    <div className="flex flex-wrap items-center gap-2 mt-1.5 text-[11px] font-mono">
+                      <span className="text-slate-400">σ source: <span className="text-slate-200">{lbResult.shadowFadingSigmaSource}</span></span>
+                      {tr38901SigmaAvailable && (
+                        <button
+                          type="button"
+                          onClick={() => update(lbResult.shadowFadingSigmaSource === 'User input'
+                            ? { shadowFadingSigmaMode: 'AUTO_TR38901', shadowFadingMarginDb: undefined }
+                            : { shadowFadingSigmaMode: 'MANUAL', shadowFadingStdDevDb: sigmaEff })}
+                          className="px-2 py-0.5 rounded border border-cyan-700 text-cyan-300 hover:bg-cyan-950 cursor-pointer"
+                        >
+                          {lbResult.shadowFadingSigmaSource === 'User input' ? 'Use TR 38.901 σ' : 'Set σ manually'}
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {/* Real-time computed Shadow Fading Margin Badge */}
@@ -3955,7 +3990,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                       +{currentMargin.toFixed(1)} dB
                     </span>
                     <span className="text-[10px] text-slate-400 border-l border-slate-700 pl-2">
-                      z={currentZ.toFixed(2)} · σ={inputs.shadowFadingStdDevDb.toFixed(1)}dB
+                      z={currentZ.toFixed(2)} · σ={sigmaEff.toFixed(1)}dB
                     </span>
                   </div>
                 </div>
@@ -3974,7 +4009,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
                     {envPresets.map((env) => {
                       const envMargin = calculateShadowFadingMargin(env.sigma, inputs.coverageProbability);
-                      const isSelected = activeEnv === env.id && Math.abs(inputs.shadowFadingStdDevDb - env.sigma) < 0.15;
+                      const isSelected = activeEnv === env.id && Math.abs(sigmaEff - env.sigma) < 0.15;
                       return (
                         <button
                           key={env.id}
@@ -4063,7 +4098,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                       <button
                         type="button"
                         onClick={() => {
-                          const theoretical = calculateShadowFadingMargin(inputs.shadowFadingStdDevDb, inputs.coverageProbability);
+                          const theoretical = calculateShadowFadingMargin(sigmaEff, inputs.coverageProbability);
                           update({ shadowFadingMarginDb: theoretical });
                         }}
                         className="w-full flex items-center justify-center gap-1 text-[10px] font-mono text-cyan-400/90 hover:text-cyan-200 bg-cyan-950/50 hover:bg-cyan-950/80 border border-cyan-800/60 rounded py-1 transition-colors"
@@ -4083,7 +4118,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                           Log-Normal Std Dev (σ_SF)
                         </label>
                         <span className="text-xs font-mono font-bold text-cyan-400">
-                          {inputs.shadowFadingStdDevDb.toFixed(1)} dB
+                          {sigmaEff.toFixed(1)} dB
                         </span>
                       </div>
                       <p className="text-[10px] text-slate-500 font-mono mb-2">
@@ -4098,7 +4133,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                           min="1"
                           max="16"
                           step="0.1"
-                          value={inputs.shadowFadingStdDevDb.toFixed(1)}
+                          value={sigmaEff.toFixed(1)}
                           onChange={(e) => {
                             const val = Math.max(0.5, Number(e.target.value));
                             const newMargin = calculateShadowFadingMargin(val, inputs.coverageProbability);
@@ -4117,7 +4152,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                         min="2"
                         max="14"
                         step="0.1"
-                        value={inputs.shadowFadingStdDevDb}
+                        value={sigmaEff}
                         onChange={(e) => {
                           const val = Number(e.target.value);
                           const newMargin = calculateShadowFadingMargin(val, inputs.coverageProbability);
@@ -4157,7 +4192,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                         value={inputs.coverageProbability}
                         onChange={(e) => {
                           const prob = Number(e.target.value);
-                          const newMargin = calculateShadowFadingMargin(inputs.shadowFadingStdDevDb, prob);
+                          const newMargin = calculateShadowFadingMargin(sigmaEff, prob);
                           update({
                             coverageProbability: prob,
                             shadowFadingMarginDb: newMargin
