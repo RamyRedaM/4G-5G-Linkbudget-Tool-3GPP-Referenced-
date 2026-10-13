@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { LinkBudgetCalculationResult, LinkBudgetInputs } from '../types/telecom';
 import { calculatePathLoss } from '../utils/spmPropagation';
 import { TELECOM_BANDS } from '../data/telecomBands';
+import { dlSinrFromModel } from '../utils/linkBudgetCalculator';
 import { Activity, Crosshair } from 'lucide-react';
 
 interface CoverageChartsProps {
@@ -39,10 +40,10 @@ export const CoverageCharts: React.FC<CoverageChartsProps> = ({ result, inputs }
       const pl = calculatePathLoss(distKm, propParams);
       const rsrp = result.rsEirpDbm - pl;
       
-      // SINR approximation
+      // DL SINR from the link budget (same model as the 4-point table: margins at the coverage target,
+      // neighbour interference growing towards the edge, EVM ceiling)
       const normDist = distKm / result.maxCellRangeKm;
-      let sinr = 25 - normDist * 29;
-      sinr = Math.max(-6, Math.min(27, sinr));
+      const sinr = result.dlSinrModel ? dlSinrFromModel(result.dlSinrModel, pl, distKm) : 25 - normDist * 29;
 
       // Throughputs
       const peakDl = result.fourPoints[0].dlThroughputMbps;
@@ -192,13 +193,10 @@ export const CoverageCharts: React.FC<CoverageChartsProps> = ({ result, inputs }
             const maxPl = Math.max(165, result.systemMaplDb + 18);
             const getY = (val: number) => margin.top + chartH - ((val - minPl) / (maxPl - minPl)) * chartH;
             const sigma = result.effectiveShadowFadingStdDevDb ?? inputs.shadowFadingStdDevDb;
-            const msf = result.shadowFadingMarginDb;
 
             // Nominal SPM Curve
             const pathD = curveData.map((pt, i) => `${i === 0 ? 'M' : 'L'} ${getX(pt.distKm)} ${getY(pt.pl)}`).join(' ');
 
-            // Effective Curve with Shadow Fading Margin (+M_SF)
-            const pathEffD = curveData.map((pt, i) => `${i === 0 ? 'M' : 'L'} ${getX(pt.distKm)} ${getY(pt.pl + msf)}`).join(' ');
 
             // Log-Normal Shadow Fading (+/- sigma) Envelope Area
             const upperPoints = curveData.map((pt) => `${getX(pt.distKm)},${getY(pt.pl + sigma)}`);
@@ -239,8 +237,6 @@ export const CoverageCharts: React.FC<CoverageChartsProps> = ({ result, inputs }
                 {/* Log-Normal Shadow Fading (+/- sigma) Envelope Area */}
                 <polygon points={envelopePolygon} fill="url(#shadowFadingGrad)" stroke="#0891B2" strokeWidth="1" strokeDasharray="2 2" strokeOpacity="0.4" />
 
-                {/* Effective Planning Curve (+M_SF Shadow Fading Margin) */}
-                <path d={pathEffD} fill="none" stroke="#F59E0B" strokeWidth="1.5" strokeDasharray="3 2" />
 
                 {/* System MAPL Limit Line */}
                 <line
@@ -305,8 +301,39 @@ export const CoverageCharts: React.FC<CoverageChartsProps> = ({ result, inputs }
 
             const pathD = curveData.map((pt, i) => `${i === 0 ? 'M' : 'L'} ${getX(pt.distKm)} ${getY(pt.rsrp)}`).join(' ');
 
+            // DL SINR on a right-hand axis (-10 ... 30 dB), from the link budget at the coverage target
+            const minSinr = -10;
+            const maxSinr = 30;
+            const getYs = (val: number) => margin.top + chartH - ((Math.max(minSinr, Math.min(maxSinr, val)) - minSinr) / (maxSinr - minSinr)) * chartH;
+            const sinrPathD = curveData.map((pt, i) => `${i === 0 ? 'M' : 'L'} ${getX(pt.distKm)} ${getYs(pt.sinr)}`).join(' ');
+
             return (
               <g>
+                {/* SINR axis (right) */}
+                {[-10, 0, 10, 20, 30].map((val) => (
+                  <text
+                    key={`s${val}`}
+                    x={margin.left + chartW + 4}
+                    y={getYs(val) + 3}
+                    textAnchor="start"
+                    className="fill-cyan-500 text-[9px] font-mono"
+                  >
+                    {val}
+                  </text>
+                ))}
+                <path d={sinrPathD} fill="none" stroke="#22D3EE" strokeWidth="1.5" strokeDasharray="5 3" />
+                {result.fourPoints.map((pt) => (
+                  <circle
+                    key={`sinr-${pt.pointName}`}
+                    cx={getX(pt.rangeKm)}
+                    cy={getYs(pt.ssSinrDb)}
+                    r="3"
+                    className="fill-cyan-300"
+                    stroke="#0B0F19"
+                    strokeWidth="1.5"
+                  />
+                ))}
+
                 {/* Horizontal Ticks */}
                 {[-70, -85, -100, -115, -125].map((val) => (
                   <g key={val}>
@@ -446,12 +473,8 @@ export const CoverageCharts: React.FC<CoverageChartsProps> = ({ result, inputs }
                   <span>Shadow Fading Envelope (±σ: ±{(result.effectiveShadowFadingStdDevDb ?? inputs.shadowFadingStdDevDb).toFixed(1)} dB)</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="w-3 h-0.5 bg-amber-400 border-b border-dashed inline-block" />
-                  <span>Effective Margin (+M_SF: +{result.shadowFadingMarginDb.toFixed(1)} dB)</span>
-                </div>
-                <div className="flex items-center gap-1.5">
                   <span className="w-3 h-0.5 bg-amber-400 inline-block" />
-                  <span>MAPL Limit ({result.systemMaplDb.toFixed(1)} dB)</span>
+                  <span>MAPL Limit ({result.systemMaplDb.toFixed(1)} dB, already includes M_SF {result.shadowFadingMarginDb.toFixed(1)} dB)</span>
                 </div>
               </>
             )}
@@ -464,6 +487,10 @@ export const CoverageCharts: React.FC<CoverageChartsProps> = ({ result, inputs }
                 <div className="flex items-center gap-1.5">
                   <span className="w-3 h-0.5 bg-rose-400 border-b border-dashed inline-block" />
                   <span>Coverage Threshold (-118 dBm)</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 border-t-2 border-dashed border-cyan-400 inline-block" />
+                  <span>DL SINR (dB, right axis)</span>
                 </div>
               </>
             )}

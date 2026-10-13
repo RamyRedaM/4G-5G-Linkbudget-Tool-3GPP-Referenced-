@@ -800,6 +800,31 @@ export const formatMcsLabel = (qm: number, codeRate: number, table: 1 | 2): stri
   return `MCS ${idx} (${modulationName(qm)} R=${r.toFixed(3)})`;
 };
 
+export interface DlSinrModel {
+  linkConstantDb: number; // BS EIRP + UE gain - body loss + Rx diversity - UE noise floor - shadow & fast fading margins
+  edgeInterferenceToSignalRatio: number | null; // I/S at the cell edge (η·F_edge·G_iso); null: fixed margin
+  pessimisticOffsetDb: number;
+  fixedInterferenceMarginDb: number;
+  cellRangeKm: number;
+  ceilingDb: number; // transmitter EVM limit
+}
+
+/**
+ * DL SINR (dB) at the coverage target for a path loss and distance: S/N = linkConstant - PL, with neighbour
+ * interference I/S(d) = x_edge·(d/R)^3.5 growing towards the cell edge, capped at the EVM limit.
+ * Used by the 4-point table and the coverage charts.
+ */
+export function dlSinrFromModel(model: DlSinrModel, pathLossDb: number, distKm: number): number {
+  const snr = model.linkConstantDb - pathLossDb;
+  const sinr = model.edgeInterferenceToSignalRatio === null
+    ? snr - model.fixedInterferenceMarginDb
+    : -10 * Math.log10(
+        Math.pow(10, -(snr - model.pessimisticOffsetDb) / 10)
+        + model.edgeInterferenceToSignalRatio * Math.pow(Math.min(1.5, distKm / Math.max(0.001, model.cellRangeKm)), 3.5)
+      );
+  return Math.min(model.ceilingDb, sinr);
+}
+
 /**
  * SNR (dB) needed to carry rateMbps on nSubcarriers, with the attenuated Shannon bound SE = α·log2(1 + SNR), α = 0.6
  * (TR 36.942 Annex A). The spectral efficiency is floored at TS 38.214 MCS 0 (QPSK R=120/1024, 0.234 b/s/Hz) and
@@ -1380,7 +1405,9 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
   // Bad radio condition sits between Medium and Cell edge (~78% range with degraded clutter / local shadowing).
   // Strictly bounded to guarantee physical monotonicity: plMed < plBad < plEdge
   const plBadNominal = calculatePathLoss(distBadKm, propParams);
-  const plBad = Number(Math.min(plEdge - 1.8, Math.max(plMed + 2.0, plBadNominal + 1.2)).toFixed(1));
+  // Path loss of the model at 78% of R_max (kept strictly between the medium and edge points). No extra
+  // shadowing is added here: the shadow fading margin is applied once, in the SINR at the coverage target.
+  const plBad = Number(Math.min(plEdge - 1.8, Math.max(plMed + 2.0, plBadNominal)).toFixed(1));
 
   // SS-RSRP = Reference Signal EIRP - PathLoss (dBm)
   // Strictly monotonic: rsrpNear > rsrpMed > rsrpBad > rsrpEdge
@@ -1410,17 +1437,16 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
   // DL interference relative to the serving signal grows towards the cell edge: I/S(d) = x_edge·(d / R)^3.5, with
   // x_edge = η·F_edge·G_iso from the interference engine.
   const dlEdgeIs: number | null = interferenceSummary.dlEdgeInterferenceToSignalRatio ?? null;
-  const dlSinrAtPl = (pl: number, distKm: number) => {
-    const snrNoInterference = bsEirpDbm + inputs.ueAntennaGainDbi - inputs.bodyLossDb - pl + ueRxDiversityGainDb
-      - ueThermalNoiseFloorDbm - shadowFadingMarginDb - dlFadingMarginDb;
-    const sinr = dlEdgeIs === null
-      ? snrNoInterference - effectiveDlInterferenceMarginDb
-      : -10 * Math.log10(
-          Math.pow(10, -(snrNoInterference - interferenceSummary.pessimisticMarginOffsetDb) / 10)
-          + dlEdgeIs * Math.pow(Math.min(1.5, distKm / Math.max(0.001, maxCellRangeKm)), 3.5)
-        );
-    return Number(Math.min(dlSinrCeilingDb, sinr).toFixed(1));
+  const dlSinrModel: DlSinrModel = {
+    linkConstantDb: Number((bsEirpDbm + inputs.ueAntennaGainDbi - inputs.bodyLossDb + ueRxDiversityGainDb
+      - ueThermalNoiseFloorDbm - shadowFadingMarginDb - dlFadingMarginDb).toFixed(2)),
+    edgeInterferenceToSignalRatio: dlEdgeIs,
+    pessimisticOffsetDb: interferenceSummary.pessimisticMarginOffsetDb,
+    fixedInterferenceMarginDb: effectiveDlInterferenceMarginDb,
+    cellRangeKm: maxCellRangeKm,
+    ceilingDb: dlSinrCeilingDb
   };
+  const dlSinrAtPl = (pl: number, distKm: number) => Number(dlSinrFromModel(dlSinrModel, pl, distKm).toFixed(1));
   const ulSinrAtPl = (pl: number) => Number(Math.min(ulSinrCeilingDb,
     ueEirpDbm + inputs.bsAntennaGainDbi - inputs.bsFeederCableLossDb - pl + ulRxGainDb
     - bsThermalNoiseFloorDbm - effectiveUlIotMarginDb - shadowFadingMarginDb - ulFadingMarginDb
@@ -1809,6 +1835,7 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
     configWarnings,
     effectiveShadowFadingStdDevDb,
     shadowFadingSigmaSource,
+    dlSinrModel,
     coverageProbabilityType,
     coverageEdgeProbabilityPercent,
     coverageAreaProbabilityPercent,

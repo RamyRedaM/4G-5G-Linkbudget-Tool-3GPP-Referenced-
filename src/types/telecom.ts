@@ -446,6 +446,7 @@ export interface LinkBudgetCalculationResult {
   coverageEdgeProbabilityPercent?: number; // cell-edge probability the shadow fading margin is based on
   coverageAreaProbabilityPercent?: number; // equivalent area coverage (Jakes)
   pathLossExponentAtEdge?: number;
+  dlSinrModel?: import('../utils/linkBudgetCalculator').DlSinrModel; // DL SINR vs path loss / distance (shared with charts)
   effectiveShadowFadingStdDevDb?: number; // σ actually used for the shadow fading margin
   shadowFadingSigmaSource?: string; // where σ came from (TR 38.901 table or user input)
   maxCellRangeCapped?: boolean; // true when R_max is limited by the propagation model validity range
