@@ -3,7 +3,7 @@ import { LinkBudgetCalculationResult, LinkBudgetInputs } from '../types/telecom'
 export function exportLinkBudgetCsv(result: LinkBudgetCalculationResult, inputs: LinkBudgetInputs) {
   const lines: string[] = [];
 
-  lines.push('=== 4G-5G LKB (3GPP Ref) Ver 1.33.2 by RamyREDA ===');
+  lines.push('=== 4G-5G LKB (3GPP Ref) Ver 1.33.3 by RamyREDA ===');
   lines.push(`Generated: ${new Date().toISOString()}`);
   lines.push(`Technology: ${inputs.technology}`);
   lines.push(`Band: ${inputs.band} (${inputs.duplexMode})`);
@@ -38,6 +38,13 @@ export function exportLinkBudgetCsv(result: LinkBudgetCalculationResult, inputs:
   lines.push(`Shadow Fading Margin (M_SF): ${result.shadowFadingMarginDb.toFixed(1)} dB`);
   lines.push(`DL Fading Margin: ${result.dlFadingMarginDb.toFixed(1)} dB`);
   lines.push(`UL Fading Margin: ${result.ulFadingMarginDb.toFixed(1)} dB`);
+  if (result.interferenceSummary) {
+    lines.push(`Interference Scenario: ${result.interferenceSummary.scenario === 'ISOLATED_CELL' ? 'Isolated Single Cell (0 dB)' : `${result.interferenceSummary.tiers}-Tier Hexagonal (${result.interferenceSummary.totalSites} sites, ${result.interferenceSummary.totalNeighborSectors} sectors, ISD=${result.interferenceSummary.isdMeters}m)`}`);
+    lines.push(`Interference Modeling Method: ${result.interferenceSummary.methodName}`);
+    lines.push(`Neighbor Cell Load / Intra-Cell Load: ${result.interferenceSummary.neighborLoadPercent}% / ${result.interferenceSummary.intraCellLoadPercent}%`);
+    lines.push(`DL Interference Margin: ${result.interferenceSummary.effectiveDlInterferenceMarginDb.toFixed(1)} dB (Calculated: ${result.interferenceSummary.calculatedDlInterferenceMarginDb.toFixed(1)} dB + Pessimistic: ${result.interferenceSummary.pessimisticMarginOffsetDb.toFixed(1)} dB)`);
+    lines.push(`UL IoT Noise Rise Margin: ${result.interferenceSummary.effectiveUlIotMarginDb.toFixed(1)} dB (Calculated: ${result.interferenceSummary.calculatedUlIotMarginDb.toFixed(1)} dB + Pessimistic: ${result.interferenceSummary.pessimisticMarginOffsetDb.toFixed(1)} dB)`);
+  }
   lines.push(`DL Noise Figure: ${(inputs.dlNoiseFigureDb ?? inputs.ueNoiseFigureDb ?? 7.0).toFixed(1)} dB`);
   lines.push(`UL Noise Figure: ${(inputs.ulNoiseFigureDb ?? inputs.bsNoiseFigureDb ?? 4.0).toFixed(1)} dB`);
   lines.push(`DL Thermal Noise per Subcarrier: ${result.rxSensitivityBreakdown.dl.thermalNoisePerSubcarrierDbm.toFixed(2)} dBm/SC (${result.rxSensitivityBreakdown.dl.scsKhz} kHz SCS)`);
