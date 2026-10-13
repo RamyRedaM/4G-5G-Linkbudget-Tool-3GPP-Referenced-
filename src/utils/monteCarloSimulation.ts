@@ -176,7 +176,11 @@ export function runMonteCarloSimulation(
     const shadowFading = generateGaussian(0, shadowFadingStdDevDb, rand);
     const isIndoor = rand() * 100 < indoorProbabilityPercent;
     const penetrationLoss = isIndoor
-      ? generateGaussian(16.5, 3.5, rand)
+      ? (inputs.indoorOutdoorScenario === 'TUNNEL_COVERAGE'
+          ? generateGaussian(19.5, 2.2, rand)
+          : inputs.indoorOutdoorScenario === 'INDOOR_DEEP'
+          ? generateGaussian(24.0, 3.5, rand)
+          : generateGaussian(14.0, 2.8, rand))
       : 0.0;
     const bodyLoss = Math.max(0.5, generateGaussian(inputs.bodyLossDb || 3.0, 1.2, rand));
 

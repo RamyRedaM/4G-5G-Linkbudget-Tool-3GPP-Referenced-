@@ -47,7 +47,8 @@ import { calculateControlOverheads, calculateLinkBudget } from '../utils/linkBud
 import {
   calculateShadowFadingMargin,
   calculateStdDevFromMargin,
-  getGaussianZ
+  getGaussianZ,
+  getBuildingPenetrationLoss
 } from '../utils/spmPropagation';
 
 interface InputPanelProps {
@@ -141,13 +142,16 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
   };
 
   // Filter bands according to selected technology and duplex mode
-  const availableBands = TELECOM_BANDS.filter(b => {
+  const currentTechBands = TELECOM_BANDS.filter(b => {
     if (inputs.technology === '4G') {
       return b.tech === '4G' || b.tech === 'BOTH';
     } else {
       return b.tech === '5G' || b.tech === 'BOTH';
     }
-  }).filter(b => b.duplex === inputs.duplexMode);
+  });
+  const availableBands = currentTechBands.filter(b => b.duplex === inputs.duplexMode);
+  const otherDuplexMode: DuplexMode = inputs.duplexMode === 'TDD' ? 'FDD' : 'TDD';
+  const otherBands = currentTechBands.filter(b => b.duplex === otherDuplexMode);
 
   const selectedBandInfo = TELECOM_BANDS.find(b => b.band === inputs.band) || availableBands[0] || TELECOM_BANDS[0];
 
@@ -603,19 +607,33 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
 
             {/* Band selection */}
             <div>
-              <label className="block text-xs font-mono uppercase tracking-wider text-slate-400 mb-1.5">
-                3GPP Operating Band
+              <label className="block text-xs font-mono uppercase tracking-wider text-slate-400 mb-1.5 flex items-center justify-between">
+                <span>3GPP Operating Band</span>
+                <span className="text-[11px] text-cyan-400 font-normal">
+                  {selectedBandInfo.band} · {selectedBandInfo.duplex} ({selectedBandInfo.dlFreqMHz} MHz)
+                </span>
               </label>
               <select
                 value={inputs.band}
                 onChange={(e) => handleBandChange(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-100 font-mono focus:border-cyan-400 focus:outline-none"
               >
-                {availableBands.map((b) => (
-                  <option key={b.band} value={b.band}>
-                    {b.name} - {b.commonName}
-                  </option>
-                ))}
+                <optgroup label={`${inputs.duplexMode} Operating Bands (${availableBands.length})`}>
+                  {availableBands.map((b) => (
+                    <option key={b.band} value={b.band}>
+                      {b.name} - {b.commonName}
+                    </option>
+                  ))}
+                </optgroup>
+                {otherBands.length > 0 && (
+                  <optgroup label={`${otherDuplexMode} Operating Bands [Switches Duplex] (${otherBands.length})`}>
+                    {otherBands.map((b) => (
+                      <option key={b.band} value={b.band}>
+                        {b.name} - {b.commonName}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
             </div>
           </div>
@@ -3056,10 +3074,104 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                 <option value="OUTDOOR_NLOS">Pure Outdoor NLOS (Clutter Shadowing)</option>
                 <option value="IN_VEHICLE">In-Vehicle Penetration (~8-10 dB)</option>
                 <option value="INDOOR_STANDARD">Indoor Standard Glass/Plaster (~12-16 dB)</option>
+                <option value="TUNNEL_COVERAGE">Inside Tunnel Coverage (~18-24 dB)</option>
                 <option value="INDOOR_DEEP">Deep Indoor / Low-E Glass & Concrete (~22-28 dB)</option>
               </select>
             </div>
           </div>
+
+          {/* Inside Tunnel Coverage Modeling Deep-Dive Callout */}
+          {inputs.indoorOutdoorScenario === 'TUNNEL_COVERAGE' && (() => {
+            const currentFreq = selectedBandInfo?.dlFreqMHz || 2100;
+            const tunnelPenetration = getBuildingPenetrationLoss('TUNNEL_COVERAGE', currentFreq);
+            return (
+              <div className="p-4 bg-slate-950/90 border border-cyan-800/80 rounded-lg space-y-3 font-mono shadow-md">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+                  <div className="flex items-center gap-2 text-cyan-300 font-semibold text-xs">
+                    <Activity className="w-4 h-4 text-cyan-400" />
+                    <span>3GPP & INDUSTRY TUNNEL PROPAGATION MODELING (TR 38.901 HST & ITU-R)</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-slate-400">Portal / Aperture Coupling Loss:</span>
+                    <span className="text-xs font-bold text-cyan-300 bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-700">
+                      +{tunnelPenetration.toFixed(2)} dB
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-[11px]">
+                  {/* Waveguide & Attenuation */}
+                  <div className="p-2.5 bg-slate-900/80 rounded border border-slate-800 space-y-1">
+                    <div className="text-cyan-400 font-bold flex items-center gap-1">
+                      <span>1. Waveguide Mode Attenuation</span>
+                    </div>
+                    <p className="text-slate-300 leading-relaxed text-[10px]">
+                      At cellular frequencies ({currentFreq} MHz), straight tunnels act as oversized dielectric waveguides. Near-zone features multimode interference; far-zone exhibits low longitudinal attenuation (α ≈ 0.015 - 0.04 dB/m / 15-40 dB/km).
+                    </p>
+                  </div>
+
+                  {/* Shadow Fading & Presets */}
+                  <div className="p-2.5 bg-slate-900/80 rounded border border-slate-800 space-y-1.5">
+                    <div className="text-cyan-400 font-bold flex items-center justify-between">
+                      <span>2. Shadow Fading (Slow Fading)</span>
+                      <span className="text-[10px] text-slate-400">σ: 5.5 dB vs 3.0 dB</span>
+                    </div>
+                    <p className="text-slate-300 leading-relaxed text-[10px]">
+                      Confined concrete/rock walls eliminate external clutter scatter. 3GPP HST standard models vehicular blockage with σ = 5.5 dB, or σ = 3.0 dB with Leaky Coaxial Feeder.
+                    </p>
+                    <div className="flex items-center gap-1.5 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const margin = calculateShadowFadingMargin(5.5, inputs.coverageProbability);
+                          update({
+                            shadowFadingStdDevDb: 5.5,
+                            shadowFadingMarginDb: margin,
+                            shadowFadingEnvironment: 'TUNNEL'
+                          });
+                        }}
+                        className={`text-[9px] px-2 py-1 rounded border transition-all ${
+                          Math.abs(inputs.shadowFadingStdDevDb - 5.5) < 0.2
+                            ? 'bg-cyan-900 border-cyan-400 text-cyan-200'
+                            : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-cyan-600'
+                        }`}
+                      >
+                        Apply σ = 5.5 dB (HST)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const margin = calculateShadowFadingMargin(3.0, inputs.coverageProbability);
+                          update({
+                            shadowFadingStdDevDb: 3.0,
+                            shadowFadingMarginDb: margin,
+                            shadowFadingEnvironment: 'CUSTOM'
+                          });
+                        }}
+                        className={`text-[9px] px-2 py-1 rounded border transition-all ${
+                          Math.abs(inputs.shadowFadingStdDevDb - 3.0) < 0.2
+                            ? 'bg-cyan-900 border-cyan-400 text-cyan-200'
+                            : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-cyan-600'
+                        }`}
+                      >
+                        Apply σ = 3.0 dB (Leaky DAS)
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Fast Fading & Leaky Feeder */}
+                  <div className="p-2.5 bg-slate-900/80 rounded border border-slate-800 space-y-1">
+                    <div className="text-cyan-400 font-bold">
+                      <span>3. Fast Fading & Small-Scale Physics</span>
+                    </div>
+                    <p className="text-slate-300 leading-relaxed text-[10px]">
+                      Rician fading dominates LOS & leaky feeder (K ≈ 8-12 dB). Degrades to Rayleigh around curves or vehicle shadowing. In high-speed rail (HST), Doppler shift reaches ±1 kHz at 3.5 GHz.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Log-Normal Shadow Fading & Margins Panel */}
           {(() => {
@@ -3070,6 +3182,13 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
             const currentZ = getGaussianZ(inputs.coverageProbability);
 
             const envPresets = [
+              {
+                id: 'TUNNEL' as const,
+                name: 'Inside Tunnel',
+                sigma: 5.5,
+                desc: 'Confined waveguide, train/vehicular blockage (3GPP HST)',
+                clutter: 'URBAN' as EnvironmentClutter
+              },
               {
                 id: 'RURAL' as const,
                 name: 'Rural / Farmland',
@@ -3101,6 +3220,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
             ];
 
             const activeEnv = inputs.shadowFadingEnvironment ?? (
+              Math.abs(inputs.shadowFadingStdDevDb - 5.5) < 0.2 ? 'TUNNEL' :
               Math.abs(inputs.shadowFadingStdDevDb - 6.0) < 0.2 ? 'RURAL' :
               Math.abs(inputs.shadowFadingStdDevDb - 7.0) < 0.2 ? 'SUBURBAN' :
               Math.abs(inputs.shadowFadingStdDevDb - 8.5) < 0.2 ? 'URBAN' :
@@ -3144,7 +3264,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                       Target P_cov: {inputs.coverageProbability}%
                     </span>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
                     {envPresets.map((env) => {
                       const envMargin = calculateShadowFadingMargin(env.sigma, inputs.coverageProbability);
                       const isSelected = activeEnv === env.id && Math.abs(inputs.shadowFadingStdDevDb - env.sigma) < 0.15;

@@ -33,7 +33,7 @@ export type UeCategory =
   | 'LTE_CAT4_STD'    // 4G LTE Cat 4 Legacy (2x2 DL / 1Tx UL - 150/50 Mbps)
   | 'LTE_CATM1_IOT';  // Cellular IoT Cat-M1 / NB-IoT (1T1R / 23 dBm / 1.4 MHz)
 export type EnvironmentClutter = 'DENSE_URBAN' | 'URBAN' | 'SUBURBAN' | 'RURAL';
-export type IndoorOutdoorScenario = 'OUTDOOR_LOS' | 'OUTDOOR_NLOS' | 'IN_VEHICLE' | 'INDOOR_STANDARD' | 'INDOOR_DEEP';
+export type IndoorOutdoorScenario = 'OUTDOOR_LOS' | 'OUTDOOR_NLOS' | 'IN_VEHICLE' | 'INDOOR_STANDARD' | 'TUNNEL_COVERAGE' | 'INDOOR_DEEP';
 export type PropagationModelType = 'SPM' | '3GPP_UMA' | '3GPP_UMI' | '3GPP_RMA' | 'COST231_HATA' | 'FSPL';
 
 export interface BandInfo {
@@ -112,7 +112,7 @@ export interface LinkBudgetInputs {
   coverageProbability: number; // e.g. 90%, 95%
   shadowFadingStdDevDb: number; // Log-normal fading std dev (e.g. 6 to 10 dB)
   shadowFadingMarginDb?: number; // Shadow Fading Margin (dB): user-defined or calculated from log-normal std dev (sigma) based on urban/rural environments
-  shadowFadingEnvironment?: 'RURAL' | 'SUBURBAN' | 'URBAN' | 'DENSE_URBAN' | 'CUSTOM'; // Environment profile for log-normal std dev
+  shadowFadingEnvironment?: 'RURAL' | 'SUBURBAN' | 'URBAN' | 'DENSE_URBAN' | 'TUNNEL' | 'CUSTOM'; // Environment profile for log-normal std dev
   dlFadingMarginDb?: number; // Downlink multipath/fast fading margin (e.g. 1.0 to 6.0 dB, default 2.0 dB)
   ulFadingMarginDb?: number; // Uplink multipath/fast fading margin (e.g. 1.0 to 6.0 dB, default 2.5 dB)
   interferenceMarginDb: number; // e.g. 2 to 4 dB

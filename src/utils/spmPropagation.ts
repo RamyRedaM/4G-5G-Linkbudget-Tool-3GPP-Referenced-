@@ -80,6 +80,10 @@ export function getBuildingPenetrationLoss(scenario: IndoorOutdoorScenario, freq
     case 'INDOOR_STANDARD':
       // Standard residential/office (plasterboard, standard glass) ~ 12-16 dB
       return 12.0 + Math.min(8.0, 1.2 * Math.log10(fGhz + 1));
+    case 'TUNNEL_COVERAGE':
+      // Inside Tunnel Coverage: portal penetration & entrance transition coupling loss (~18-24 dB)
+      // 3GPP TR 38.901 HST In-Tunnel, ITU-R P.1411 & CommScope/RFS radiating cable / portal studies
+      return 18.0 + Math.min(6.0, 2.2 * Math.log10(fGhz + 1));
     case 'INDOOR_DEEP':
       // Deep indoor / high-loss commercial (thermal IRR glass, reinforced concrete) ~ 22-30 dB
       return 22.0 + Math.min(10.0, 2.5 * Math.log10(fGhz + 1));
