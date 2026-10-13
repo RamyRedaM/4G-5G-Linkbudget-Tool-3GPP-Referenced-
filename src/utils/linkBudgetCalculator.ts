@@ -27,6 +27,8 @@ import {
   getTr38901ShadowFadingSigmaDb,
   getPenetrationLossSigmaDb,
   getPathLossExponent,
+  getPropagationModelFrequencyRange,
+  getRangeSearchCeilingKm,
   edgeProbabilityForAreaCoverage,
   jakesAreaCoverage
 } from './spmPropagation';
@@ -1198,7 +1200,28 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
   }
 
   // Propagation model validity: the range is capped where the model stops being defined
-  const modelValidity = getPropagationModelValidity(inputs.propagationModel, inputs.indoorOutdoorScenario);
+  const modelValidity = getPropagationModelValidity(inputs.propagationModel, inputs.indoorOutdoorScenario, inputs.bsHeightMeters, inputs.ueHeightMeters);
+
+  // Frequency validity of the propagation model
+  const freqRange = getPropagationModelFrequencyRange(inputs.propagationModel);
+  if (freqRange && (dlFreqMHz < freqRange.minMHz || dlFreqMHz > freqRange.maxMHz)) {
+    configWarnings.push(
+      `${inputs.propagationModel.replace(/_/g, ' ')} is used at ${dlFreqMHz} MHz, outside its defined range (${freqRange.reference}). ` +
+      `Its path loss is extrapolated; prefer a model defined for this band (e.g. TR 38.901 UMa / UMi / RMa).`
+    );
+  }
+  if (inputs.propagationModel === 'FSPL') {
+    configWarnings.push(
+      'Free space / two-ray is a line-of-sight reference only (no clutter, no obstruction). It is not a coverage planning model; the range is capped at the radio horizon.'
+    );
+  }
+  // Range search ceiling reached by a model without a validity limit (SPM)
+  if (!modelValidity && maxCellRangeKm >= getRangeSearchCeilingKm(propParams) - 0.01) {
+    configWarnings.push(
+      `Cell range reached the ${getRangeSearchCeilingKm(propParams)} km search limit: the MAPL is larger than the path loss anywhere within it. ` +
+      `Check the propagation model calibration (SPM K1/K2, clutter) for this band and environment.`
+    );
+  }
   const maxCellRangeCapped = modelValidity !== null && maxCellRangeKm >= modelValidity.maxDistanceKm - 0.001;
   if (maxCellRangeCapped && modelValidity) {
     const plAtLimit = calculatePathLoss(modelValidity.maxDistanceKm, propParams);

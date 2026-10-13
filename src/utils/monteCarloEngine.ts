@@ -1459,18 +1459,18 @@ export function executeSelfTests(lkbInputs: LinkBudgetInputs): UnitTestItem[] {
     hmMeters: 1.5,
     model: '3GPP_UMA',
     clutter: 'URBAN',
-    scenario: 'OUTDOOR_LOS',
+    scenario: 'OUTDOOR_NLOS',
     additionalPenetrationLossDb: 0,
     foliageLossDb: 0,
     shadowFadingStdDevDb: 0,
     coverageProbability: 95
   });
-  const passedPl = pl1km > 95 && pl1km < 125;
+  const passedPl = Math.abs(pl1km - 141.7) < 0.5;
   tests.push({
-    testName: '3GPP TR 38.901 UMa LOS Free-Space / Path Loss at d=1.0 km',
+    testName: '3GPP TR 38.901 UMa NLOS Path Loss at d=1.0 km',
     category: 'PROPAGATION',
-    inputDescription: 'fc = 3.5 GHz, h_BS = 25m, h_UT = 1.5m, d = 1000m LOS',
-    expectedOutput: '100 – 115 dB path loss',
+    inputDescription: 'fc = 3.5 GHz, h_BS = 25m, h_UT = 1.5m, d = 1000m NLOS',
+    expectedOutput: '141.7 dB (13.54 + 39.08·log10(d3D) + 20·log10(fc))',
     actualOutput: `${pl1km.toFixed(1)} dB`,
     passed: passedPl,
     standardClause: 'TR 38.901 Table 7.4.1-1'

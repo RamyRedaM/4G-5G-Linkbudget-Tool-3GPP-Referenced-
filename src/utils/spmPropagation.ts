@@ -208,6 +208,66 @@ export function getUmaUmiBreakpointMeters(hbMeters: number, hmMeters: number, fG
   return (4 * hBsEff * hUtEff * fGhz * 1e9) / SPEED_OF_LIGHT;
 }
 
+/** Two-ray (plane-earth) breakpoint distance d_BP = 4·h_b·h_m/λ, in km. */
+export function getTwoRayBreakpointKm(hbMeters: number, hmMeters: number, freqMHz: number): number {
+  const lambda = SPEED_OF_LIGHT / (freqMHz * 1e6);
+  return (4 * Math.max(1, hbMeters) * Math.max(0.5, hmMeters) / lambda) / 1000;
+}
+
+/** Radio horizon with the 4/3 effective earth radius: d = 4.12·(√h_b + √h_m) km. */
+export function getRadioHorizonKm(hbMeters: number, hmMeters: number): number {
+  return 4.12 * (Math.sqrt(Math.max(0, hbMeters)) + Math.sqrt(Math.max(0, hmMeters)));
+}
+
+/**
+ * LOS probability, TR 38.901 Table 7.4.2-1 (d2D in m):
+ * UMa: 1 for d ≤ 18 m, else [18/d + exp(-d/63)·(1 - 18/d)]·(1 + C'(h_UT)·5/4·(d/100)³·exp(-d/150)),
+ *      C'(h_UT) = 0 for h_UT ≤ 13 m, ((h_UT - 13)/10)^1.5 above
+ * UMi: 1 for d ≤ 18 m, else 18/d + exp(-d/36)·(1 - 18/d)
+ * RMa: 1 for d ≤ 10 m, else exp(-(d - 10)/1000)
+ */
+export function getLosProbability(model: PropagationModelType, d2dMeters: number, hmMeters: number): number {
+  const d = Math.max(1, d2dMeters);
+  switch (model) {
+    case '3GPP_UMA': {
+      if (d <= 18) return 1;
+      const cPrime = hmMeters <= 13 ? 0 : Math.pow((hmMeters - 13) / 10, 1.5);
+      return Math.min(1, (18 / d + Math.exp(-d / 63) * (1 - 18 / d)) * (1 + cPrime * 1.25 * Math.pow(d / 100, 3) * Math.exp(-d / 150)));
+    }
+    case '3GPP_UMI':
+      return d <= 18 ? 1 : 18 / d + Math.exp(-d / 36) * (1 - 18 / d);
+    case '3GPP_RMA':
+      return d <= 10 ? 1 : Math.exp(-(d - 10) / 1000);
+    default:
+      return 1;
+  }
+}
+
+/**
+ * Expected path loss over the LOS / NLOS states, weighted in dB: PL = P_LOS·PL_LOS + (1 - P_LOS)·PL_NLOS.
+ * (Averaging received power instead would let a small LOS probability dominate where LOS is tens of dB stronger,
+ * e.g. at mmWave, which overstates coverage at a high location probability.)
+ */
+function blendLosNlos(plLos: number, plNlos: number, pLos: number): number {
+  return pLos * plLos + (1 - pLos) * plNlos;
+}
+
+/** Frequency range (MHz) over which a propagation model is defined; null when it has no formal range (SPM is calibrated). */
+export function getPropagationModelFrequencyRange(model: PropagationModelType): { minMHz: number; maxMHz: number; reference: string } | null {
+  switch (model) {
+    case '3GPP_UMA': return { minMHz: 500, maxMHz: 100000, reference: 'TR 38.901 UMa: 0.5–100 GHz' };
+    case '3GPP_UMI': return { minMHz: 500, maxMHz: 100000, reference: 'TR 38.901 UMi: 0.5–100 GHz' };
+    case '3GPP_RMA': return { minMHz: 500, maxMHz: 30000, reference: 'TR 38.901 RMa: 0.5–30 GHz' };
+    case 'COST231_HATA': return { minMHz: 1500, maxMHz: 2000, reference: 'COST-231 Hata: 1500–2000 MHz (Okumura-Hata below 1500 MHz)' };
+    default: return null;
+  }
+}
+
+/** Upper bound of the cell range search (km) when the model has no validity limit. */
+export function getRangeSearchCeilingKm(params: PropagationParams): number {
+  return params.clutter === 'RURAL' || params.model === 'FSPL' ? 100.0 : 50.0;
+}
+
 export interface PropagationModelValidity {
   maxDistanceKm: number;
   reference: string;
@@ -219,9 +279,15 @@ export interface PropagationModelValidity {
  */
 export function getPropagationModelValidity(
   model: PropagationModelType,
-  scenario: IndoorOutdoorScenario
+  scenario: IndoorOutdoorScenario,
+  hbMeters?: number,
+  hmMeters?: number
 ): PropagationModelValidity | null {
   switch (model) {
+    case 'FSPL': {
+      const horizon = getRadioHorizonKm(hbMeters ?? 30, hmMeters ?? 1.5);
+      return { maxDistanceKm: Number(horizon.toFixed(1)), reference: `radio horizon 4.12·(√h_b + √h_m) = ${horizon.toFixed(1)} km (free space / two-ray, LOS reference only)` };
+    }
     case '3GPP_UMA':
       return { maxDistanceKm: 5, reference: 'TR 38.901 UMa: 10 m ≤ d2D ≤ 5 km' };
     case '3GPP_UMI':
@@ -258,7 +324,8 @@ export function calculatePathLoss(
       // Standard Propagation Model (calibrated modified Cost-231 / Hata for RF planning tools)
       // PL_median = K1 + K2*log10(d_km) + K3*log10(hb) + K5*log10(d_km)*log10(hb) + K_clutter
       const k1 = params.spmK1Override ?? (144.2 + 25.5 * Math.log10(Math.max(0.7, fGhz)));
-      const k2 = params.spmK2Override ?? (44.9 - 6.55 * Math.log10(hb));
+      // K2 = 44.9 dB/decade; the antenna-height dependence of the slope is the separate K5·log10(d)·log10(h_b) term
+      const k2 = params.spmK2Override ?? 44.9;
       const k3 = -13.82;
       const k5 = -6.55;
       const clutterLoss = getClutterOffsetDb(params.clutter);
@@ -279,11 +346,10 @@ export function calculatePathLoss(
           - 9.0 * Math.log10(dBpMeters * dBpMeters + Math.pow(hb - hm, 2));
       const plNlos = 13.54 + 39.08 * Math.log10(d3dMeters) + 20.0 * Math.log10(fGhz) - 0.6 * (hm - 1.5);
       
-      if (params.scenario === 'OUTDOOR_LOS') {
-        rawPl = plLos;
-      } else {
-        rawPl = Math.max(plLos, plNlos) + (params.clutter === 'DENSE_URBAN' ? 3.0 : params.clutter === 'SUBURBAN' ? -4.0 : 0);
-      }
+      const plNlosEff = Math.max(plLos, plNlos) + (params.clutter === 'DENSE_URBAN' ? 3.0 : params.clutter === 'SUBURBAN' ? -4.0 : 0);
+      rawPl = params.scenario === 'OUTDOOR_LOS'
+        ? blendLosNlos(plLos, plNlosEff, getLosProbability('3GPP_UMA', d2dMeters, hm))
+        : plNlosEff;
       break;
     }
 
@@ -299,11 +365,9 @@ export function calculatePathLoss(
           - 9.5 * Math.log10(dBpMeters * dBpMeters + Math.pow(hb - hm, 2));
       const plNlos = 22.4 + 35.3 * Math.log10(d3dMeters) + 21.3 * Math.log10(fGhz) - 0.3 * (hm - 1.5);
 
-      if (params.scenario === 'OUTDOOR_LOS') {
-        rawPl = plLos;
-      } else {
-        rawPl = Math.max(plLos, plNlos);
-      }
+      rawPl = params.scenario === 'OUTDOOR_LOS'
+        ? blendLosNlos(plLos, Math.max(plLos, plNlos), getLosProbability('3GPP_UMI', d2dMeters, hm))
+        : Math.max(plLos, plNlos);
       break;
     }
 
@@ -328,7 +392,9 @@ export function calculatePathLoss(
         + 20 * Math.log10(fGhz)
         - (3.2 * Math.pow(Math.log10(11.75 * hm), 2) - 4.97);
 
-      rawPl = params.scenario === 'OUTDOOR_LOS' ? plLos : Math.max(plLos, plNlos);
+      rawPl = params.scenario === 'OUTDOOR_LOS'
+        ? blendLosNlos(plLos, Math.max(plLos, plNlos), getLosProbability('3GPP_RMA', d2dMeters, hm))
+        : Math.max(plLos, plNlos);
       break;
     }
 
@@ -344,8 +410,11 @@ export function calculatePathLoss(
 
     case 'FSPL':
     default: {
-      // Free Space Path Loss: 32.44 + 20*log10(f_MHz) + 20*log10(d_km)
-      rawPl = 32.44 + 20 * Math.log10(fMhz) + 20 * Math.log10(d);
+      // LOS reference: free space (32.44 + 20·log10(f_MHz) + 20·log10(d_km)) up to the two-ray breakpoint
+      // d_BP = 4·h_b·h_m/λ, then the plane-earth (two-ray) slope of 40 dB/decade; range capped at the radio horizon
+      const fspl = (dKm: number) => 32.44 + 20 * Math.log10(fMhz) + 20 * Math.log10(dKm);
+      const dBpKm = getTwoRayBreakpointKm(params.hbMeters, params.hmMeters, fMhz);
+      rawPl = d <= dBpKm ? fspl(d) : fspl(dBpKm) + 40 * Math.log10(d / dBpKm);
       break;
     }
   }
@@ -377,15 +446,10 @@ export function calculateDistanceForPathLoss(
   if (targetPlDb <= 40) return 0.01;
 
   let low = 0.005; // 5 meters
-  let high = 50.0; // 50 km
-
-  // Expand high bound if rural or free space
-  if (params.clutter === 'RURAL' || params.model === 'FSPL') {
-    high = 100.0;
-  }
+  let high = getRangeSearchCeilingKm(params);
 
   // Never extrapolate a model beyond its validity range: the range is capped at the model limit
-  const validity = getPropagationModelValidity(params.model, params.scenario);
+  const validity = getPropagationModelValidity(params.model, params.scenario, params.hbMeters, params.hmMeters);
   if (validity) {
     high = Math.min(high, validity.maxDistanceKm);
     if (calculatePathLoss(high, params) <= targetPlDb) {

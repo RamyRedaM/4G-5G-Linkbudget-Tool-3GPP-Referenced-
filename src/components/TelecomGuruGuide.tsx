@@ -44,7 +44,7 @@ export const TelecomGuruGuide: React.FC<TelecomGuruGuideProps> = ({ isOpen, onCl
             </div>
             <ul className="list-disc list-inside mt-2 space-y-1 text-slate-400 font-mono text-[11px]">
               <li><strong>K₁:</strong> Constant offset calibrated to frequency (144.2 + 25.5·log₁₀(f_GHz))</li>
-              <li><strong>K₂:</strong> Distance slope exponent (typically 44.9 - 6.55·log₁₀(h_BS))</li>
+              <li><strong>K₂:</strong> Distance slope exponent (standard 44.9; the h_BS slope term is K₅·log₁₀(d)·log₁₀(h_BS))</li>
               <li><strong>K₃:</strong> Antenna height factor (-13.82)</li>
               <li><strong>K_clutter:</strong> Clutter morphology correction (+4 dB Dense Urban, 0 dB Urban, -7.5 dB Suburban, -18 dB Rural)</li>
             </ul>

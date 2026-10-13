@@ -3792,8 +3792,8 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                 onChange={(e) => update({ indoorOutdoorScenario: e.target.value as IndoorOutdoorScenario })}
                 className="w-full bg-slate-950 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-100 font-mono focus:border-cyan-400 focus:outline-none"
               >
-                <option value="OUTDOOR_LOS">Pure Outdoor LOS (0 dB Penetration)</option>
-                <option value="OUTDOOR_NLOS">Pure Outdoor NLOS (Clutter Shadowing)</option>
+                <option value="OUTDOOR_LOS">Outdoor, LOS probability (TR 38.901 P_LOS weighting; FSPL: LOS)</option>
+                <option value="OUTDOOR_NLOS">Outdoor NLOS (worst case)</option>
                 <option value="IN_VEHICLE">In-Vehicle (TR 38.901 car penetration, 9 dB)</option>
                 <option value="INDOOR_STANDARD">Indoor, low-loss building (TR 38.901 O2I: {getBuildingPenetrationLoss('INDOOR_STANDARD', selectedBandInfo?.dlFreqMHz || 2100, inputs.propagationModel).toFixed(1)} dB)</option>
                 <option value="TUNNEL_COVERAGE">Inside Tunnel Coverage (~18-24 dB)</option>
