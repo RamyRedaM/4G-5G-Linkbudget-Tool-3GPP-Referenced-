@@ -254,6 +254,7 @@ export interface MonteCarloDashboardResults {
   
   // Bins Breakdown
   binResults: BinResultSummary[];
+  pathLossDiagnostics?: PathLossDiagnostics;
   
   // CDF Curves
   sinrCdf: { percentile: number; dlSinrDb: number; ulSinrDb: number }[];
@@ -304,4 +305,46 @@ export interface UnitTestItem {
   actualOutput: string;
   passed: boolean;
   standardClause: string;
+}
+
+// ----------------------------------------------------
+// Path Loss Diagnostics (Monte Carlo vs LKB propagation curve)
+// ----------------------------------------------------
+export interface PathLossDiagnosticBin {
+  binIndex: number;
+  innerRadiusMeters: number;
+  outerRadiusMeters: number;
+  midDistanceMeters: number;
+  samples: number; // user drops in this bin over all iterations
+  lkbPathLossAtMidDb: number; // LKB curve at the bin mid distance
+  mcMedianPathLossAtMidDb: number; // Monte Carlo median path loss at the bin mid distance
+  meanMedianPathLossDb: number; // mean distance-based path loss of the users dropped in the bin
+  meanTotalPathLossDb: number; // incl. shadowing, O2I penetration and body loss
+  minTotalPathLossDb: number;
+  maxTotalPathLossDb: number;
+  meanShadowFadingDb: number; // should be ~0 dB
+  stdShadowFadingDb: number; // should be ~ the configured sigma
+  meanPenetrationLossDb: number;
+  meanBodyLossDb: number;
+  indoorPercent: number;
+  maxCurveDeviationDb: number; // max |MC median + LKB scenario penetration - LKB curve| over all users in the bin
+}
+
+export interface PathLossDiagnostics {
+  propagationModel: PropagationModelType;
+  environmentClutter: EnvironmentClutter;
+  dlFreqMHz: number;
+  ulFreqMHz: number;
+  lkbScenario: IndoorOutdoorScenario;
+  mcOutdoorScenario: IndoorOutdoorScenario;
+  lkbScenarioPenetrationDb: number; // expected LKB curve offset above the MC median curve
+  configuredShadowSigmaDb: number;
+  lkbShadowFadingMarginDb: number;
+  lkbMaplDb: number;
+  lkbMaxCellRangeMeters: number;
+  maxCurveDeviationDb: number;
+  curveMatches: boolean;
+  lkbCurve: { distanceMeters: number; lkbPathLossDb: number; mcMedianPathLossDb: number }[];
+  samplePoints: { distanceMeters: number; medianPathLossDb: number; totalPathLossDb: number; isIndoor: boolean }[]; // first 1,500 user drops
+  bins: PathLossDiagnosticBin[];
 }

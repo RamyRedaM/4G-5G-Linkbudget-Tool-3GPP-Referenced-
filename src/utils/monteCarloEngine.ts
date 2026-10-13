@@ -16,9 +16,13 @@ import {
   AssumptionItem,
   ServiceType,
   ServiceDefinition,
-  BinPlacementMethod
+  BinPlacementMethod,
+  PathLossDiagnostics,
+  PathLossDiagnosticBin
 } from '../types/monteCarlo';
-import { calculatePathLoss, PropagationParams } from './spmPropagation';
+import { calculatePathLoss, getBuildingPenetrationLoss, PropagationParams } from './spmPropagation';
+import { calculateLinkBudget } from './linkBudgetCalculator';
+import { TELECOM_BANDS } from '../data/telecomBands';
 
 // ====================================================
 // 1. Seeded PRNG (mulberry32) & Box-Muller Gaussian
@@ -298,6 +302,55 @@ export const DEFAULT_UE_CLASSES: UeClassConfig[] = [
 ];
 
 // ====================================================
+// 5b. LKB-Consistent Propagation Helpers
+// ====================================================
+/**
+ * Propagation parameters built exactly as the LKB module builds them in calculateLinkBudget():
+ * band DL centre frequency, BS/UE heights, model, clutter, scenario, foliage, additional loss and SPM K1/K2 overrides.
+ * Shadow fading is excluded (the LKB covers it with a margin, the Monte Carlo engine samples it per user).
+ */
+export function buildLkbPropagationParams(inputs: LinkBudgetInputs, freqMHz?: number): PropagationParams {
+  const band = TELECOM_BANDS.find(b => b.band === inputs.band) || TELECOM_BANDS[0];
+  return {
+    freqMHz: freqMHz ?? band.dlFreqMHz,
+    hbMeters: inputs.bsHeightMeters,
+    hmMeters: inputs.ueHeightMeters,
+    model: inputs.propagationModel,
+    clutter: inputs.environmentClutter,
+    scenario: inputs.indoorOutdoorScenario,
+    additionalPenetrationLossDb: inputs.additionalPenetrationLossDb,
+    foliageLossDb: inputs.foliageLossDb,
+    spmK1Override: inputs.spmK1,
+    spmK2Override: inputs.spmK2
+  };
+}
+
+/**
+ * Outdoor propagation state used for every Monte Carlo user: the LOS/NLOS state of the LKB scenario,
+ * without the LKB's scenario building penetration. Indoor users get their O2I loss once, from the per-user draw.
+ */
+export function getMonteCarloOutdoorScenario(lkbScenario: IndoorOutdoorScenario): IndoorOutdoorScenario {
+  return lkbScenario === 'OUTDOOR_LOS' ? 'OUTDOOR_LOS' : 'OUTDOOR_NLOS';
+}
+
+/** Distance-dependent median path loss (no shadowing, O2I or body loss) of a Monte Carlo user. */
+export function calculateMonteCarloMedianPathLoss(distKm: number, inputs: LinkBudgetInputs, freqMHz?: number): number {
+  return calculatePathLoss(distKm, {
+    ...buildLkbPropagationParams(inputs, freqMHz),
+    scenario: getMonteCarloOutdoorScenario(inputs.indoorOutdoorScenario)
+  });
+}
+
+/**
+ * Expected offset between the LKB curve and the Monte Carlo median curve: the building penetration the LKB adds
+ * for its selected scenario (0 dB for outdoor scenarios). The Monte Carlo engine models O2I per user instead.
+ */
+export function getLkbScenarioPenetrationDb(inputs: LinkBudgetInputs): number {
+  const band = TELECOM_BANDS.find(b => b.band === inputs.band) || TELECOM_BANDS[0];
+  return getBuildingPenetrationLoss(inputs.indoorOutdoorScenario, band.dlFreqMHz);
+}
+
+// ====================================================
 // 6. Bin Placement Helpers
 // ====================================================
 export function generateBins(
@@ -305,8 +358,10 @@ export function generateBins(
   cellRangeMeters: number,
   method: BinPlacementMethod,
   totalUsers: number,
-  baseIndoorPercent: number
+  baseIndoorPercent: number,
+  propagationInputs?: LinkBudgetInputs
 ): BinConfig[] {
+  const rsEirpDbm = propagationInputs ? calculateLinkBudget(propagationInputs).rsEirpDbm : 43.0;
   const bins: BinConfig[] = [];
   const R = Math.max(100, cellRangeMeters);
   const n = Math.max(1, Math.min(25, Math.round(numBins)));
@@ -338,9 +393,14 @@ export function generateBins(
     const usersInBin = Math.max(0, baseCount + (k <= remainder ? 1 : 0));
     const midDistanceMeters = (r1 + r2) / 2;
 
-    // Estimated pathloss & RSRP preview
-    const meanPl = Number((128.1 + 37.6 * Math.log10(Math.max(0.01, midDistanceMeters / 1000))).toFixed(1));
-    const expRsrp = Number((43.0 - meanPl).toFixed(1));
+    // Estimated pathloss & RSRP preview: LKB propagation model when inputs are given,
+    // otherwise the generic TR 36.942 macro formula (128.1 + 37.6 log10 d)
+    const midDistKm = Math.max(0.01, midDistanceMeters / 1000);
+    const meanPl = Number((propagationInputs
+      ? calculateMonteCarloMedianPathLoss(midDistKm, propagationInputs)
+      : 128.1 + 37.6 * Math.log10(midDistKm)
+    ).toFixed(1));
+    const expRsrp = Number((rsEirpDbm - meanPl).toFixed(1));
     const expSinrMin = Number((20 - (k / n) * 28).toFixed(1));
     const expSinrMax = Number((expSinrMin + 6.0).toFixed(1));
     const expMcs = Math.max(1, Math.min(15, Math.round(15 - (k / n) * 12)));
@@ -400,12 +460,48 @@ export function executeMonteCarloSimulation(
   // Sector Angle: 120 degrees (-60 to +60 deg)
   const sectorBoreDeg = 120;
   const baseThermalNoiseScDbm = -174 + 10 * Math.log10(scsKhz * 1000);
-  const dlNoiseFloorDbm = baseThermalNoiseScDbm + 10 * Math.log10(prbCount * 12) + (lkbInputs.ueNoiseFigureDb ?? 7.0);
-  const ulNoiseFloorDbm = baseThermalNoiseScDbm + 10 * Math.log10(prbCount * 12) + (lkbInputs.bsNoiseFigureDb ?? 4.0);
-  
+
+  // Link budget terms recomputed from the scenario inputs with the LKB engine, so the Monte Carlo signal chain
+  // uses the same EIRP (incl. beamforming gain), receive gains and UL noise bandwidth as the LKB MAPL.
+  const lkbRef = calculateLinkBudget(lkbInputs);
+  const dlRef = lkbRef.rxSensitivityBreakdown.dl;
+  const ulRef = lkbRef.rxSensitivityBreakdown.ul;
+  const bsEirpDbm = lkbRef.bsEirpDbm; // Tx power + antenna gain - feeder loss + DL beamforming gain
+  const rsEirpDbm = lkbRef.rsEirpDbm;
+  const dlRxGainDb = dlRef.rxDiversityGainDb ?? 0;
+  const ulRxGainDb = ulRef.rxGainDb ?? 0;
+  // DL: full-carrier signal power over full-carrier noise (UE NF added per UE class below)
+  const dlThermalNoiseDbm = baseThermalNoiseScDbm + 10 * Math.log10(prbCount * 12);
+  // UL: noise over the LKB cell-edge UL allocation, the bandwidth the UE concentrates its power in
+  const ulNoiseFloorDbm = ulRef.thermalNoiseFloorDbm;
+
+  const bandInfo = TELECOM_BANDS.find(b => b.band === lkbInputs.band) || TELECOM_BANDS[0];
+  const dlFreqMHz = bandInfo.dlFreqMHz;
+  const ulFreqMHz = bandInfo.ulFreqMHz || dlFreqMHz;
+  const sigmaSf = lkbInputs.shadowFadingStdDevDb ?? 8.0;
+  const lkbBodyLossDb = lkbInputs.bodyLossDb ?? 3.0;
+  const lkbPropParams = buildLkbPropagationParams(lkbInputs, dlFreqMHz);
+  const lkbScenarioPenetrationDb = getLkbScenarioPenetrationDb(lkbInputs);
+
   // Inter-cell interference power estimated from Tab 5 interference engine
   const dlInterferenceMarginDb = lkbResult.interferenceSummary?.effectiveDlInterferenceMarginDb ?? 3.0;
   const ulIotMarginDb = lkbResult.interferenceSummary?.effectiveUlIotMarginDb ?? 3.0;
+
+  // Path loss diagnostic accumulators (per bin, over all iterations)
+  const plDiag = bins.map(() => ({
+    samples: 0,
+    medianSum: 0,
+    totalSum: 0,
+    totalMin: Infinity,
+    totalMax: -Infinity,
+    sfSum: 0,
+    sfSqSum: 0,
+    penSum: 0,
+    bodySum: 0,
+    indoorCount: 0,
+    maxAbsCurveDeltaDb: 0
+  }));
+  const diagSamplePoints: PathLossDiagnostics['samplePoints'] = [];
 
   // Running tracking statistics
   const iterationCellDlMbps: number[] = [];
@@ -468,10 +564,8 @@ export function executeMonteCarloSimulation(
         // Indoor / Outdoor decision
         const isIndoor = rand() * 100 < bin.indoorProbabilityPercent;
         const penetrationLossDb = isIndoor ? (rand() > 0.5 ? 18.0 : 12.0) : 0.0;
-        const bodyLossDb = rand() > 0.4 ? 3.0 : 0.0;
 
-        // Shadow fading (log-normal via Box-Muller)
-        const sigmaSf = lkbInputs.shadowFadingStdDevDb || 8.0;
+        // Shadow fading (log-normal via Box-Muller), zero mean with the LKB sigma
         const shadowFadingDb = sampleGaussian(0, sigmaSf, rand);
 
         // UE Class selection
@@ -502,29 +596,46 @@ export function executeMonteCarloSimulation(
         const servDef = serviceCatalogue.find(s => s.id === chosenServiceId) || serviceCatalogue[0];
         const isActiveInBh = rand() * 100 < (servDef.isGbr ? servDef.erlangsPerUser * 100 * 5 : 80);
 
-        // Pathloss calculation
-        const distKm = Math.max(0.01, dist / 1000);
-        const plParams = {
-          freqMHz: lkbInputs.frequencyMHz || 3500,
-          hbMeters: lkbInputs.bsHeightMeters || 25,
-          hmMeters: lkbInputs.ueHeightMeters || 1.5,
-          model: lkbInputs.propagationModel || '3GPP_UMA',
-          clutter: lkbInputs.environmentClutter || 'URBAN',
-          scenario: (isIndoor ? 'INDOOR_STANDARD' : 'OUTDOOR_LOS') as IndoorOutdoorScenario,
-          additionalPenetrationLossDb: penetrationLossDb,
-          foliageLossDb: 0,
-          shadowFadingStdDevDb: 0, // already applied separately
-          coverageProbability: 95
-        };
-        const rawPlDb = calculatePathLoss(distKm, plParams);
-        const totalDlPlDb = rawPlDb + shadowFadingDb + penetrationLossDb + bodyLossDb;
-        const totalUlPlDb = totalDlPlDb;
+        // Body loss from the LKB, not applied to fixed CPE terminals
+        const bodyLossDb = ueClass.type === 'OUTDOOR_CPE' ? 0.0 : lkbBodyLossDb;
 
-        // Downlink RSRP & SINR
-        const bsEirpDbm = (lkbInputs.bsTxPowerDbm || 46) + (lkbInputs.bsAntennaGainDbi || 18) - (lkbInputs.bsFeederCableLossDb || 0.5);
-        const dlRsrpDbm = bsEirpDbm - totalDlPlDb + ueClass.antennaGainDbi;
-        // DL SINR: S / (I + N)
-        const dlSinrDb = Number((dlRsrpDbm - dlNoiseFloorDbm - dlInterferenceMarginDb).toFixed(1));
+        // Pathloss: LKB propagation model and parameters at the band's DL / UL frequency (outdoor LOS/NLOS state of the
+        // LKB scenario), then shadowing, O2I penetration and body loss added exactly once each
+        const distKm = Math.max(0.01, dist / 1000);
+        const medianDlPlDb = calculateMonteCarloMedianPathLoss(distKm, lkbInputs, dlFreqMHz);
+        const medianUlPlDb = ulFreqMHz === dlFreqMHz ? medianDlPlDb : calculateMonteCarloMedianPathLoss(distKm, lkbInputs, ulFreqMHz);
+        const totalDlPlDb = medianDlPlDb + shadowFadingDb + penetrationLossDb + bodyLossDb;
+        const totalUlPlDb = medianUlPlDb + shadowFadingDb + penetrationLossDb + bodyLossDb;
+
+        // Diagnostic: the median must sit on the LKB curve, offset only by the LKB scenario's own penetration
+        const diag = plDiag[bIdx];
+        const curveDeltaDb = Math.abs(medianDlPlDb + lkbScenarioPenetrationDb - calculatePathLoss(distKm, lkbPropParams));
+        diag.samples++;
+        diag.medianSum += medianDlPlDb;
+        diag.totalSum += totalDlPlDb;
+        diag.totalMin = Math.min(diag.totalMin, totalDlPlDb);
+        diag.totalMax = Math.max(diag.totalMax, totalDlPlDb);
+        diag.sfSum += shadowFadingDb;
+        diag.sfSqSum += shadowFadingDb * shadowFadingDb;
+        diag.penSum += penetrationLossDb;
+        diag.bodySum += bodyLossDb;
+        if (isIndoor) diag.indoorCount++;
+        diag.maxAbsCurveDeltaDb = Math.max(diag.maxAbsCurveDeltaDb, curveDeltaDb);
+        if (diagSamplePoints.length < 1500) {
+          diagSamplePoints.push({
+            distanceMeters: Math.round(dist),
+            medianPathLossDb: Number(medianDlPlDb.toFixed(1)),
+            totalPathLossDb: Number(totalDlPlDb.toFixed(1)),
+            isIndoor
+          });
+        }
+
+        // Downlink RSRP (per RE, TS 38.215) & SINR
+        const dlRsrpDbm = rsEirpDbm - totalDlPlDb + ueClass.antennaGainDbi;
+        const dlRxPowerDbm = bsEirpDbm - totalDlPlDb + ueClass.antennaGainDbi + dlRxGainDb;
+        const dlNoiseFloorDbm = dlThermalNoiseDbm + ueClass.noiseFigureDb;
+        // DL SINR: S / (I + N), with I as the LKB interference margin (noise rise)
+        const dlSinrDb = Number((dlRxPowerDbm - dlNoiseFloorDbm - dlInterferenceMarginDb).toFixed(1));
 
         // Uplink Open-Loop Power Control (TS 38.213 §7.1.1):
         // P_tx = min(Pcmax, P0 + alpha*PL)
@@ -533,7 +644,8 @@ export function executeMonteCarloSimulation(
         const targetTxPowerDbm = p0Dbm + alpha * totalUlPlDb;
         const ueTxPowerDbm = Math.min(ueClass.txPowerDbm, targetTxPowerDbm);
         const isPowerLimited = ueTxPowerDbm >= ueClass.txPowerDbm;
-        const ulRxPowerDbm = ueTxPowerDbm + ueClass.antennaGainDbi - totalUlPlDb + (lkbInputs.bsAntennaGainDbi || 18);
+        const ulRxPowerDbm = ueTxPowerDbm + ueClass.antennaGainDbi - totalUlPlDb
+          + lkbInputs.bsAntennaGainDbi - lkbInputs.bsFeederCableLossDb + ulRxGainDb;
         const ulSinrDb = Number((ulRxPowerDbm - ulNoiseFloorDbm - ulIotMarginDb).toFixed(1));
 
         // Link Abstraction & Rank Adaptation
@@ -954,6 +1066,68 @@ export function executeMonteCarloSimulation(
     }
   }
 
+  // Path loss diagnostics: LKB curve vs Monte Carlo median, plus per-bin path loss components
+  const binPathLoss: PathLossDiagnosticBin[] = bins.map((bin, idx) => {
+    const d = plDiag[idx];
+    const n = Math.max(1, d.samples);
+    const midKm = Math.max(0.01, (bin.innerRadiusMeters + bin.outerRadiusMeters) / 2000);
+    const sfMean = d.sfSum / n;
+    const sfStd = Math.sqrt(Math.max(0, d.sfSqSum / n - sfMean * sfMean));
+    const lkbAtMid = calculatePathLoss(midKm, lkbPropParams);
+    const mcAtMid = calculateMonteCarloMedianPathLoss(midKm, lkbInputs, dlFreqMHz);
+    return {
+      binIndex: bin.binIndex,
+      innerRadiusMeters: bin.innerRadiusMeters,
+      outerRadiusMeters: bin.outerRadiusMeters,
+      midDistanceMeters: Math.round(midKm * 1000),
+      samples: d.samples,
+      lkbPathLossAtMidDb: Number(lkbAtMid.toFixed(1)),
+      mcMedianPathLossAtMidDb: Number(mcAtMid.toFixed(1)),
+      meanMedianPathLossDb: Number((d.medianSum / n).toFixed(1)),
+      meanTotalPathLossDb: Number((d.totalSum / n).toFixed(1)),
+      minTotalPathLossDb: d.samples ? Number(d.totalMin.toFixed(1)) : 0,
+      maxTotalPathLossDb: d.samples ? Number(d.totalMax.toFixed(1)) : 0,
+      meanShadowFadingDb: Number(sfMean.toFixed(2)),
+      stdShadowFadingDb: Number(sfStd.toFixed(2)),
+      meanPenetrationLossDb: Number((d.penSum / n).toFixed(1)),
+      meanBodyLossDb: Number((d.bodySum / n).toFixed(1)),
+      indoorPercent: Number(((d.indoorCount / n) * 100).toFixed(1)),
+      maxCurveDeviationDb: Number(d.maxAbsCurveDeltaDb.toFixed(3))
+    };
+  });
+
+  const curveMaxMeters = Math.max(100, ...bins.map(b => b.outerRadiusMeters));
+  const curveStartMeters = Math.max(10, curveMaxMeters / 100);
+  const lkbCurve = Array.from({ length: 41 }, (_, i) => {
+    const distM = curveStartMeters * Math.pow(curveMaxMeters / curveStartMeters, i / 40);
+    const distKm = distM / 1000;
+    return {
+      distanceMeters: Math.round(distM),
+      lkbPathLossDb: Number(calculatePathLoss(distKm, lkbPropParams).toFixed(2)),
+      mcMedianPathLossDb: Number(calculateMonteCarloMedianPathLoss(distKm, lkbInputs, dlFreqMHz).toFixed(2))
+    };
+  });
+
+  const maxCurveDeviationDb = Math.max(0, ...binPathLoss.map(b => b.maxCurveDeviationDb));
+  const pathLossDiagnostics: PathLossDiagnostics = {
+    propagationModel: lkbInputs.propagationModel,
+    environmentClutter: lkbInputs.environmentClutter,
+    dlFreqMHz,
+    ulFreqMHz,
+    lkbScenario: lkbInputs.indoorOutdoorScenario,
+    mcOutdoorScenario: getMonteCarloOutdoorScenario(lkbInputs.indoorOutdoorScenario),
+    lkbScenarioPenetrationDb: Number(lkbScenarioPenetrationDb.toFixed(1)),
+    configuredShadowSigmaDb: sigmaSf,
+    lkbShadowFadingMarginDb: lkbRef.shadowFadingMarginDb,
+    lkbMaplDb: lkbRef.systemMaplDb,
+    lkbMaxCellRangeMeters: lkbRef.maxCellRangeMeters,
+    maxCurveDeviationDb,
+    curveMatches: maxCurveDeviationDb < 0.05,
+    lkbCurve,
+    samplePoints: diagSamplePoints,
+    bins: binPathLoss
+  };
+
   return {
     timestamp: new Date().toISOString(),
     seed: settings.seed,
@@ -993,6 +1167,7 @@ export function executeMonteCarloSimulation(
     jainsFairnessIndex: jainsIndex,
     dlUlThroughputRatio: Number((meanDlCellRate / Math.max(0.1, meanUlCellRate)).toFixed(1)),
     binResults,
+    pathLossDiagnostics,
     sinrCdf,
     throughputCdf,
     mcsHistogram,
@@ -1088,6 +1263,24 @@ export function executeSelfTests(lkbInputs: LinkBudgetInputs): UnitTestItem[] {
     actualOutput: `${(ebLoss * 100).toFixed(2)}% blocking`,
     passed: passedEb,
     standardClause: 'ITU-R E.500 / 3GPP TS 22.011'
+  });
+
+  // Test 6: Monte Carlo median path loss lies on the LKB propagation curve
+  const lkbCheck = calculateLinkBudget(lkbInputs);
+  const checkParams = buildLkbPropagationParams(lkbInputs);
+  const checkOffset = getLkbScenarioPenetrationDb(lkbInputs);
+  const checkRangeKm = Math.max(0.05, lkbCheck.maxCellRangeKm);
+  const maxDev = Math.max(...[0.15, 0.5, 0.78, 1.0].map(f =>
+    Math.abs(calculateMonteCarloMedianPathLoss(checkRangeKm * f, lkbInputs) + checkOffset - calculatePathLoss(checkRangeKm * f, checkParams))
+  ));
+  tests.push({
+    testName: 'Monte Carlo Median Path Loss vs LKB Propagation Curve',
+    category: 'PROPAGATION',
+    inputDescription: `${lkbInputs.propagationModel} · ${lkbInputs.environmentClutter} · ${lkbInputs.indoorOutdoorScenario} · d = 15/50/78/100% of R_max`,
+    expectedOutput: `Deviation < 0.05 dB (after the LKB scenario's ${checkOffset.toFixed(1)} dB penetration offset)`,
+    actualOutput: `${maxDev.toFixed(3)} dB max deviation`,
+    passed: maxDev < 0.05,
+    standardClause: 'LKB propagation engine (TR 38.901 / SPM / Hata)'
   });
 
   return tests;

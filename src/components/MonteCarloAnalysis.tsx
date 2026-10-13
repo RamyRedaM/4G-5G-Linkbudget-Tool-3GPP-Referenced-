@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { PathLossDiagnosticsPanel } from './PathLossDiagnosticsPanel';
 import { LinkBudgetCalculationResult, LinkBudgetInputs } from '../types/telecom';
 import {
   UeClassConfig,
@@ -73,6 +74,7 @@ export const MonteCarloAnalysis: React.FC<MonteCarloAnalysisProps> = ({ result, 
   const [showUnitTests, setShowUnitTests] = useState(false);
   const [showAssumptions, setShowAssumptions] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [showPathLossDiagnostics, setShowPathLossDiagnostics] = useState(false);
   const [assumptionsTab, setAssumptionsTab] = useState<'AUTO' | '5G' | '4G' | 'ALL'>('AUTO');
   const [unitTestResults, setUnitTestResults] = useState<UnitTestItem[] | null>(null);
 
@@ -86,7 +88,7 @@ export const MonteCarloAnalysis: React.FC<MonteCarloAnalysisProps> = ({ result, 
   const [totalUsers, setTotalUsers] = useState<number>(60);
   const [baseIndoorPercent, setBaseIndoorPercent] = useState<number>(40);
   const [bins, setBins] = useState<BinConfig[]>(() =>
-    generateBins(5, result.maxCellRangeMeters || 1000, 'UNIFORM_DISTANCE', 60, 40)
+    generateBins(5, result.maxCellRangeMeters || 1000, 'UNIFORM_DISTANCE', 60, 40, lkbInputs)
   );
 
   // Tab 3: Traffic Profiles & Service Catalogue
@@ -151,10 +153,10 @@ export const MonteCarloAnalysis: React.FC<MonteCarloAnalysisProps> = ({ result, 
   };
 
   // Sync Bins when Range or Method Changes
-  const handleRegenerateBins = (n: number, m: BinPlacementMethod, uTot: number, ind: number) => {
+  const handleRegenerateBins = (n: number, m: BinPlacementMethod, uTot: number, ind: number, propInputs: LinkBudgetInputs = scenarioInputs) => {
     const validN = Math.max(1, Math.min(20, Math.round(n)));
     const validTot = Math.max(1, Math.min(3000, Math.round(uTot)));
-    const newBins = generateBins(validN, result.maxCellRangeMeters || 1000, m, validTot, ind);
+    const newBins = generateBins(validN, result.maxCellRangeMeters || 1000, m, validTot, ind, propInputs);
     setBins(newBins);
   };
 
@@ -280,7 +282,7 @@ export const MonteCarloAnalysis: React.FC<MonteCarloAnalysisProps> = ({ result, 
 
   const handleImportFromLkb = () => {
     setScenarioInputs({ ...lkbInputs });
-    handleRegenerateBins(numBins, binMethod, totalUsers, baseIndoorPercent);
+    handleRegenerateBins(numBins, binMethod, totalUsers, baseIndoorPercent, lkbInputs);
     const techLabel = lkbInputs.technology === '4G' ? '4G LTE' : lkbInputs.technology === '5G_NSA' ? '5G NSA' : '5G NR SA';
     setSyncFeedback(`Synchronized with LKB (${techLabel} · Band ${lkbInputs.band} · ${lkbInputs.bandwidthMHz} MHz · MAPL ${result.systemMaplDb.toFixed(1)} dB · Range ${result.maxCellRangeKm.toFixed(2)} km)`);
     setTimeout(() => {
@@ -1545,7 +1547,21 @@ export const MonteCarloAnalysis: React.FC<MonteCarloAnalysisProps> = ({ result, 
               <span className="text-slate-500">· {dashboardResults.completedIterations.toLocaleString()} Drops · Seed: {dashboardResults.seed}</span>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setShowPathLossDiagnostics(v => !v)}
+                aria-pressed={showPathLossDiagnostics}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors cursor-pointer ${
+                  showPathLossDiagnostics
+                    ? 'bg-amber-500/15 border-amber-500/50 text-amber-200'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                }`}
+                title="Diagnostic output mode: compare Monte Carlo path loss per bin with the LKB propagation curve"
+              >
+                <Activity className="w-4 h-4" />
+                <span>{showPathLossDiagnostics ? 'Hide' : 'Show'} Path Loss Diagnostics</span>
+              </button>
+
               <button
                 onClick={() => setShowReportModal(true)}
                 className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold transition-all shadow-md shadow-cyan-950/50 cursor-pointer"
@@ -1701,6 +1717,13 @@ export const MonteCarloAnalysis: React.FC<MonteCarloAnalysisProps> = ({ result, 
               </table>
             </div>
           </div>
+
+          {/* Diagnostic output mode: Monte Carlo path loss vs LKB propagation curve */}
+          {showPathLossDiagnostics && dashboardResults.pathLossDiagnostics && (
+            <PathLossDiagnosticsPanel
+              diagnostics={dashboardResults.pathLossDiagnostics}
+            />
+          )}
 
           {/* 1. Top Graphs: CDF and Capacity Curve Side-by-Side (2 Columns) */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
