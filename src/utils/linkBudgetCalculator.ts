@@ -22,7 +22,8 @@ import { TELECOM_BANDS, MIMO_CONFIGS, TDD_FRAME_PATTERNS } from '../data/telecom
 import {
   calculatePathLoss,
   calculateDistanceForPathLoss,
-  calculateShadowFadingMargin
+  calculateShadowFadingMargin,
+  getPropagationModelValidity
 } from './spmPropagation';
 import { calculateInterferenceSummary } from './interferenceCalculator';
 
@@ -751,6 +752,91 @@ export function resolveCellEdgeService(
   };
 }
 
+// TS 38.214 Table 5.1.3.1-1 (MCS table 1, up to 64QAM) and 5.1.3.1-2 (MCS table 2, up to 256QAM): [Qm, R x 1024]
+const MCS_TABLE_1: [number, number][] = [
+  [2, 120], [2, 157], [2, 193], [2, 251], [2, 308], [2, 379], [2, 449], [2, 526], [2, 602], [2, 679],
+  [4, 340], [4, 378], [4, 434], [4, 490], [4, 553], [4, 616], [4, 658],
+  [6, 438], [6, 466], [6, 517], [6, 567], [6, 616], [6, 666], [6, 719], [6, 772], [6, 822], [6, 873], [6, 910], [6, 948]
+];
+const MCS_TABLE_2: [number, number][] = [
+  [2, 120], [2, 193], [2, 308], [2, 449], [2, 602],
+  [4, 378], [4, 434], [4, 490], [4, 553], [4, 616], [4, 658],
+  [6, 466], [6, 517], [6, 567], [6, 616], [6, 666], [6, 719], [6, 772], [6, 822], [6, 873],
+  [8, 682.5], [8, 711], [8, 754], [8, 797], [8, 841], [8, 885], [8, 916.5], [8, 948]
+];
+// TS 38.214 Table 5.2.2.1-2 (CQI table 1) and 5.2.2.1-3 (CQI table 2), index 1..15
+const CQI_TABLE_1: [number, number][] = [
+  [2, 78], [2, 120], [2, 193], [2, 308], [2, 449], [2, 602], [4, 378], [4, 490], [4, 616],
+  [6, 466], [6, 567], [6, 666], [6, 772], [6, 873], [6, 948]
+];
+const CQI_TABLE_2: [number, number][] = [
+  [2, 78], [2, 193], [2, 449], [4, 378], [4, 490], [4, 616], [6, 466], [6, 567], [6, 666],
+  [6, 772], [6, 873], [8, 711], [8, 797], [8, 885], [8, 948]
+];
+
+const nearestTableIndex = (table: [number, number][], qm: number, codeRate: number): number => {
+  let best = -1;
+  table.forEach(([q, r], i) => {
+    if (q === qm && (best < 0 || Math.abs(r / 1024 - codeRate) < Math.abs(table[best][1] / 1024 - codeRate))) best = i;
+  });
+  return Math.max(0, best);
+};
+export const nearestMcsIndex = (qm: number, codeRate: number, table: 1 | 2): number =>
+  nearestTableIndex(table === 2 ? MCS_TABLE_2 : MCS_TABLE_1, qm, codeRate);
+export const nearestCqiIndex = (qm: number, codeRate: number, table: 1 | 2): number =>
+  nearestTableIndex(table === 2 ? CQI_TABLE_2 : CQI_TABLE_1, qm, codeRate) + 1;
+export const modulationName = (qm: number): string =>
+  qm >= 8 ? '256QAM' : qm >= 6 ? '64QAM' : qm >= 4 ? '16QAM' : 'QPSK';
+export const formatMcsLabel = (qm: number, codeRate: number, table: 1 | 2): string => {
+  const idx = nearestMcsIndex(qm, codeRate, table);
+  const r = (table === 2 ? MCS_TABLE_2 : MCS_TABLE_1)[idx][1] / 1024;
+  return `MCS ${idx} (${modulationName(qm)} R=${r.toFixed(3)})`;
+};
+
+// Maximum transmission bandwidth configuration N_RB per channel bandwidth (MHz)
+// TS 38.101-1 Table 5.3.2-1 (FR1), TS 38.101-2 Table 5.3.2-1 (FR2), TS 36.101 Table 5.6-1 (LTE)
+const NR_FR1_NRB: Record<number, Record<number, number>> = {
+  15: { 5: 25, 10: 52, 15: 79, 20: 106, 25: 133, 30: 160, 35: 188, 40: 216, 45: 242, 50: 270 },
+  30: { 5: 11, 10: 24, 15: 38, 20: 51, 25: 65, 30: 78, 35: 92, 40: 106, 45: 119, 50: 133, 60: 162, 70: 189, 80: 217, 90: 245, 100: 273 },
+  60: { 10: 11, 15: 18, 20: 24, 25: 31, 30: 38, 35: 44, 40: 51, 45: 58, 50: 65, 60: 79, 70: 93, 80: 107, 90: 121, 100: 135 }
+};
+const NR_FR2_NRB: Record<number, Record<number, number>> = {
+  60: { 50: 66, 100: 132, 200: 264 },
+  120: { 50: 32, 100: 66, 200: 132, 400: 264 }
+};
+const LTE_NRB: Record<number, number> = { 1.4: 6, 3: 15, 5: 25, 10: 50, 15: 75, 20: 100 };
+
+/** SCS used by the link budget: the requested SCS when 3GPP defines it for the frequency range, else the default. */
+export function resolveSubcarrierSpacingKhz(is5G: boolean, isMmWave: boolean, requestedKhz?: number): number {
+  if (!is5G) return 15;
+  const allowed = isMmWave ? [60, 120] : [15, 30, 60];
+  return requestedKhz !== undefined && allowed.includes(requestedKhz) ? requestedKhz : (isMmWave ? 120 : 30);
+}
+
+export interface TransmissionBandwidthConfig {
+  nPrb: number;
+  bandwidthMHz: number; // bandwidth actually used (nearest defined one when the request is not defined)
+  valid: boolean;
+  supportedMHz: number[];
+  reference: string;
+}
+
+export function resolveTransmissionBandwidth(
+  is5G: boolean,
+  isMmWave: boolean,
+  scsKhz: number,
+  bandwidthMHz: number
+): TransmissionBandwidthConfig {
+  const table = !is5G ? LTE_NRB : (isMmWave ? NR_FR2_NRB[scsKhz] ?? NR_FR2_NRB[120] : NR_FR1_NRB[scsKhz] ?? NR_FR1_NRB[30]);
+  const reference = !is5G ? 'TS 36.101' : (isMmWave ? 'TS 38.101-2 (FR2)' : 'TS 38.101-1 (FR1)');
+  const supportedMHz = Object.keys(table).map(Number).sort((a, b) => a - b);
+  if (table[bandwidthMHz] !== undefined) {
+    return { nPrb: table[bandwidthMHz], bandwidthMHz, valid: true, supportedMHz, reference };
+  }
+  const nearest = supportedMHz.reduce((best, bw) => Math.abs(bw - bandwidthMHz) < Math.abs(best - bandwidthMHz) ? bw : best, supportedMHz[0]);
+  return { nPrb: table[nearest], bandwidthMHz: nearest, valid: false, supportedMHz, reference };
+}
+
 export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalculationResult {
   const currentBand = TELECOM_BANDS.find(b => b.band === inputs.band) || TELECOM_BANDS[0];
   const dlFreqMHz = currentBand.dlFreqMHz;
@@ -801,47 +887,17 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
   // 8Rx provides +4.5 dB, 4Rx provides +2.5 dB, 2Rx baseline 0.0 dB, 1Rx (SISO) has -2.5 dB diversity loss
   const ueRxDiversityGainDb = ueRxAntennas >= 8 ? 4.5 : (ueRxAntennas >= 4 ? 2.5 : (ueRxAntennas === 1 ? -2.5 : 0.0));
 
-  // 3. PRB Configuration (3GPP TS 38.101 & TS 36.104)
-  const scsKhz = isMmWave ? 120 : (is5G ? 30 : 15);
-  let nPrbTotal = 100;
-  if (!is5G) {
-    // 4G LTE PRB Table
-    switch (inputs.bandwidthMHz) {
-      case 1.4: nPrbTotal = 6; break;
-      case 3: nPrbTotal = 15; break;
-      case 5: nPrbTotal = 25; break;
-      case 10: nPrbTotal = 50; break;
-      case 15: nPrbTotal = 75; break;
-      case 20: default: nPrbTotal = 100; break;
-    }
-  } else {
-    // 5G NR PRBs (30 kHz SCS default for Sub-6, 120 kHz for mmWave)
-    if (scsKhz === 30) {
-      switch (inputs.bandwidthMHz) {
-        case 5: nPrbTotal = 11; break;
-        case 10: nPrbTotal = 24; break;
-        case 15: nPrbTotal = 38; break;
-        case 20: nPrbTotal = 51; break;
-        case 25: nPrbTotal = 65; break;
-        case 30: nPrbTotal = 78; break;
-        case 40: nPrbTotal = 106; break;
-        case 50: nPrbTotal = 133; break;
-        case 60: nPrbTotal = 162; break;
-        case 70: nPrbTotal = 189; break;
-        case 80: nPrbTotal = 217; break;
-        case 90: nPrbTotal = 245; break;
-        case 100: default: nPrbTotal = 273; break;
-      }
-    } else if (scsKhz === 120) {
-      switch (inputs.bandwidthMHz) {
-        case 50: nPrbTotal = 32; break;
-        case 100: nPrbTotal = 66; break;
-        case 200: nPrbTotal = 132; break;
-        case 400: default: nPrbTotal = 264; break;
-      }
-    } else {
-      nPrbTotal = Math.floor((inputs.bandwidthMHz * 1000) / (12 * scsKhz) * 0.9);
-    }
+  // 3. PRB Configuration: transmission bandwidth N_RB from TS 38.101-1/-2 Table 5.3.2-1 and TS 36.101 Table 5.6-1.
+  // A bandwidth / SCS combination that 3GPP does not define falls back to the nearest defined bandwidth, with a warning.
+  const configWarnings: string[] = [];
+  const scsKhz = resolveSubcarrierSpacingKhz(is5G, isMmWave, inputs.subcarrierSpacingKhz);
+  const bwConfig = resolveTransmissionBandwidth(is5G, isMmWave, scsKhz, inputs.bandwidthMHz);
+  const nPrbTotal = bwConfig.nPrb;
+  if (!bwConfig.valid) {
+    configWarnings.push(
+      `${inputs.bandwidthMHz} MHz is not a ${bwConfig.reference} channel bandwidth at ${scsKhz} kHz SCS. ` +
+      `Calculated with ${bwConfig.bandwidthMHz} MHz (${nPrbTotal} PRBs). Supported: ${bwConfig.supportedMHz.join(', ')} MHz.`
+    );
   }
 
   // 4. Reference Signal (RS / SS-PBCH EPRE) Power
@@ -1027,6 +1083,18 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
   const maxCellRangeKm = Number(calculateDistanceForPathLoss(systemMaplDb, propParams).toFixed(3));
   const maxCellRangeMeters = Math.round(maxCellRangeKm * 1000);
 
+  // Propagation model validity: the range is capped where the model stops being defined
+  const modelValidity = getPropagationModelValidity(inputs.propagationModel, inputs.indoorOutdoorScenario);
+  const maxCellRangeCapped = modelValidity !== null && maxCellRangeKm >= modelValidity.maxDistanceKm - 0.001;
+  if (maxCellRangeCapped && modelValidity) {
+    const plAtLimit = calculatePathLoss(modelValidity.maxDistanceKm, propParams);
+    configWarnings.push(
+      `Cell range capped at ${modelValidity.maxDistanceKm} km (${modelValidity.reference}). ` +
+      `Path loss there is ${plAtLimit.toFixed(1)} dB, below the ${systemMaplDb.toFixed(1)} dB MAPL, so the link would reach further ` +
+      `than the model is defined for. Beyond this distance use a model calibrated for it (e.g. SPM tuned with drive-test data).`
+    );
+  }
+
   // 11. 3GPP TS 38.306 Overhead & Throughput Calculation Function
   const overheadSummary = calculate5GOverhead(inputs, dlFreqMHz, inputs.bandwidthMHz, scsKhz, isMmWave);
   const maxDlMod = inputs.maxDlModulation || '256QAM';
@@ -1074,13 +1142,8 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
     optimalTiltDeg
   };
 
-  const calculate3GPPThroughput = (
-    bwMHz: number,
-    sinrDb: number,
-    layers: number,
-    dutyCycle: number,
-    isUplink: boolean
-  ) => {
+  // Link adaptation: SINR -> modulation order, code rate and rank
+  const selectLinkAdaptation = (sinrDb: number, layers: number, isUplink: boolean) => {
     // SINR to Shannon / 3GPP spectral efficiency mapping
     // At low SINR (< -3 dB), MCS falls to QPSK rate 0.15
     // At high SINR (> 20 dB), 256QAM (rate 0.925) or 64QAM (rate 0.85) is achieved
@@ -1116,10 +1179,22 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
     }
 
     if (isUplink) {
-      // Handset uplink max 64QAM, rank bounded by effectiveUlLayers
+      // Handset uplink max 64QAM, rank bounded by the SINR tier and effectiveUlLayers
       qm = Math.min(qm, 6);
-      rank = Math.min(layers, effectiveUlLayers);
+      rank = Math.min(rank, layers, effectiveUlLayers);
     }
+
+    return { qm, codeRate, rank };
+  };
+
+  const calculate3GPPThroughput = (
+    bwMHz: number,
+    sinrDb: number,
+    layers: number,
+    dutyCycle: number,
+    isUplink: boolean
+  ) => {
+    const { qm, codeRate, rank } = selectLinkAdaptation(sinrDb, layers, isUplink);
 
     // 3GPP Physical Layer Overhead Breakdown (TS 38.306 Table 4.1.2-1 & Detailed TS 38.211/38.214)
     let totalOverhead = 0;
@@ -1135,7 +1210,8 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
       totalOverhead = Math.min(0.70, dmrsOh + ctrlOh);
     }
 
-    const prbs = Math.floor((bwMHz * 1000) / (12 * scsKhz) * 0.92);
+    // Exact N_RB of the (validated) carrier bandwidth
+    const prbs = resolveTransmissionBandwidth(is5G, isMmWave, scsKhz, bwMHz).nPrb;
     const symbolsPerSec = 14 * (scsKhz / 15) * 1000;
     
     // Target residual BLER factor: Effective throughput is scaled by (1 - Residual_BLER)
@@ -1187,11 +1263,29 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
   const rssiBad = Number((rsrpBad + scLogOffset + 1.5).toFixed(1));
   const rssiEdge = Number((rsrpEdge + scLogOffset + 1.0).toFixed(1));
 
-  // SS-SINR (dB)
-  const sinrNear = 25.0;
-  const sinrMed = 13.5;
-  const sinrBad = 2.5;
-  const sinrEdge = is5G ? -4.5 : -5.0;
+  // SS-SINR (dB) at each point, from the same link budget as the MAPL, at the design coverage probability
+  // (shadow fading and fast fading margins applied). At PL = DL / UL MAPL this gives exactly the required SNR.
+  // DL: BS EIRP + UE gain - body loss - PL + UE Rx diversity gain - UE noise floor - DL interference margin - margins
+  // UL: UE EIRP + BS gain - feeder loss - PL + BS Rx gain - BS noise floor - UL IoT margin - margins
+  // Capped by the transmitter EVM limit (TS 38.104 / TS 36.104 Table 6.5.2-1: 3.5% for 256QAM, 8% for 64QAM)
+  const dlSinrCeilingDb = maxDlMod === '256QAM' ? 29.1 : 21.9;
+  const ulSinrCeilingDb = 21.9;
+  const dlSinrAtPl = (pl: number) => Number(Math.min(dlSinrCeilingDb,
+    bsEirpDbm + inputs.ueAntennaGainDbi - inputs.bodyLossDb - pl + ueRxDiversityGainDb
+    - ueThermalNoiseFloorDbm - effectiveDlInterferenceMarginDb - shadowFadingMarginDb - dlFadingMarginDb
+  ).toFixed(1));
+  const ulSinrAtPl = (pl: number) => Number(Math.min(ulSinrCeilingDb,
+    ueEirpDbm + inputs.bsAntennaGainDbi - inputs.bsFeederCableLossDb - pl + ulRxGainDb
+    - bsThermalNoiseFloorDbm - effectiveUlIotMarginDb - shadowFadingMarginDb - ulFadingMarginDb
+  ).toFixed(1));
+  const sinrNear = dlSinrAtPl(plNear);
+  const sinrMed = dlSinrAtPl(plMed);
+  const sinrBad = dlSinrAtPl(plBad);
+  const sinrEdge = dlSinrAtPl(plEdge);
+  const ulSinrNear = ulSinrAtPl(plNear);
+  const ulSinrMed = ulSinrAtPl(plMed);
+  const ulSinrBad = ulSinrAtPl(plBad);
+  const ulSinrEdge = ulSinrAtPl(plEdge);
 
   // Base Latency profile
   // 5G TDD slot ~ 2.5ms, typical user plane ~ 6-9 ms; Cell edge ~ 22-30 ms due to HARQ retransmissions
@@ -1204,16 +1298,18 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
 
   // Throughputs at points for Primary Carrier
   const dlThrNear = calculate3GPPThroughput(inputs.bandwidthMHz, sinrNear, effectiveDlLayers, dlDutyCycle, false);
-  const ulThrNear = calculate3GPPThroughput(inputs.bandwidthMHz, sinrNear, effectiveUlLayers, ulDutyCycle, true);
+  const ulThrNear = calculate3GPPThroughput(inputs.bandwidthMHz, ulSinrNear, effectiveUlLayers, ulDutyCycle, true);
 
-  const dlThrMed = calculate3GPPThroughput(inputs.bandwidthMHz, sinrMed, Math.min(effectiveDlLayers, 2), dlDutyCycle, false);
-  const ulThrMed = calculate3GPPThroughput(inputs.bandwidthMHz, sinrMed, Math.min(effectiveUlLayers, 2), ulDutyCycle, true);
+  const dlThrMed = calculate3GPPThroughput(inputs.bandwidthMHz, sinrMed, effectiveDlLayers, dlDutyCycle, false);
+  const ulThrMed = calculate3GPPThroughput(inputs.bandwidthMHz, ulSinrMed, effectiveUlLayers, ulDutyCycle, true);
 
-  const dlThrBad = calculate3GPPThroughput(inputs.bandwidthMHz, sinrBad, 1, dlDutyCycle, false);
-  const ulThrBad = calculate3GPPThroughput(inputs.bandwidthMHz, sinrBad, 1, ulDutyCycle, true);
+  const dlThrBad = calculate3GPPThroughput(inputs.bandwidthMHz, sinrBad, effectiveDlLayers, dlDutyCycle, false);
+  const ulThrBad = calculate3GPPThroughput(inputs.bandwidthMHz, ulSinrBad, effectiveUlLayers, ulDutyCycle, true);
 
-  const dlThrEdge = calculate3GPPThroughput(inputs.bandwidthMHz, sinrEdge, 1, dlDutyCycle, false);
-  const ulThrEdge = calculate3GPPThroughput(inputs.bandwidthMHz, sinrEdge, 1, ulDutyCycle, true);
+  // Link adaptation at each point (labels and rank shown in the 4-point table)
+  const dlLa = [sinrNear, sinrMed, sinrBad, sinrEdge].map(v => selectLinkAdaptation(v, effectiveDlLayers, false));
+  const ulLa = [ulSinrNear, ulSinrMed, ulSinrBad, ulSinrEdge].map(v => selectLinkAdaptation(v, effectiveUlLayers, true));
+  const dlMcsTable = maxDlMod === '256QAM' ? 2 : 1;
 
   // If CA enabled, compute aggregated multipliers for near/medium points
   let caDlFactor = 1.0;
@@ -1225,20 +1321,15 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
     caUlFactor = 1.0 + (inputs.carriers.length > 1 ? 0.35 : 0); // UL CA usually 2CC max
   }
 
-  // Modulation Strings & BLER
-  const dlMcsNearStr = maxDlMod === '256QAM' ? 'MCS 27 (256QAM R=0.925)' : 'MCS 20 (64QAM R=0.852)';
-  const dlMcsMedStr = 'MCS 17 (64QAM R=0.754)';
-  const dlMcsBadStr = 'MCS 9 (16QAM R=0.553)';
-  const dlMcsEdgeStr = 'MCS 2 (QPSK R=0.188)';
-
-  const ulMcsNearStr = effectiveUlLayers > 1
-    ? `MCS 22 (${effectiveUlLayers}x64QAM Streams)`
-    : 'MCS 22 (64QAM R=0.852)';
-  const ulMcsMedStr = effectiveUlLayers > 1
-    ? `MCS 14 (${effectiveUlLayers}x16QAM Streams)`
-    : 'MCS 14 (16QAM R=0.643)';
-  const ulMcsBadStr = 'MCS 7 (16QAM/QPSK)';
-  const ulMcsEdgeStr = 'MCS 1 (QPSK R=0.152)';
+  // Modulation strings from the link adaptation at each point (TS 38.214 MCS / CQI tables)
+  const dlMcsStr = dlLa.map(la => formatMcsLabel(la.qm, la.codeRate, dlMcsTable));
+  const ulMcsStr = ulLa.map(la => la.rank > 1
+    ? `MCS ${nearestMcsIndex(la.qm, la.codeRate, 1)} (${la.rank}x${modulationName(la.qm)} Streams)`
+    : formatMcsLabel(la.qm, la.codeRate, 1));
+  const dlCqiStr = dlLa.map(la => `${modulationName(la.qm)} (CQI ${nearestCqiIndex(la.qm, la.codeRate, dlMcsTable)})`);
+  const ulModStr = ulLa.map(la => `${la.rank > 1 ? `${la.rank}x ` : ''}${modulationName(la.qm)} (MCS ${nearestMcsIndex(la.qm, la.codeRate, 1)})`);
+  const pointSummary = (i: number) =>
+    `DL rank ${dlLa[i].rank} ${modulationName(dlLa[i].qm)}, UL ${ulLa[i].rank > 1 ? `${ulLa[i].rank}x ` : ''}${modulationName(ulLa[i].qm)}`;
 
   const targetBler = inputs.residualBlerTargetPercent ?? 10.0;
   const blerNear = Number((targetBler * 0.08).toFixed(1));
@@ -1246,63 +1337,68 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
   const blerBad = Number((targetBler * 1.42).toFixed(1));
   const blerEdge = Number(targetBler.toFixed(1));
 
+  const isFixedRateEdgeService = ['VONR_5G', 'VOLTE_4G', 'NBIOT_4G'].includes(serviceResolved.serviceProfile);
+
   const fourPoints: FourPointOutput[] = [
     {
       pointName: 'Near Cell',
-      description: `LOS / Near Site (Peak radio condition, ${effectiveDlLayers}x${maxDlMod} DL, ${effectiveUlLayers}x UL)`,
+      description: `Near site, 15% of R_max (${pointSummary(0)})`,
       rangeKm: distNearKm,
       rangeMeters: Math.round(distNearKm * 1000),
       pathLossDb: plNear,
       ssRsrpDbm: rsrpNear,
       ssRssiDbm: rssiNear,
       ssSinrDb: sinrNear,
-      avgDlMcs: dlMcsNearStr,
-      avgUlMcs: ulMcsNearStr,
+      ulSinrDb: ulSinrNear,
+      avgDlMcs: dlMcsStr[0],
+      avgUlMcs: ulMcsStr[0],
       avgDlBlerPercent: blerNear,
       dlThroughputMbps: Number((dlThrNear * (inputs.caEnabled ? caDlFactor : 1)).toFixed(1)),
       ulThroughputMbps: Number((ulThrNear * (inputs.caEnabled ? caUlFactor : 1)).toFixed(1)),
       latencyMs: serviceResolved.targetLatencyMs !== undefined ? Number((serviceResolved.targetLatencyMs * 0.4).toFixed(1)) : latNear,
-      dlMcs: maxDlMod === '256QAM' ? '256QAM (CQI 15)' : '64QAM (CQI 10)',
-      ulMcs: effectiveUlLayers > 1 ? `${effectiveUlLayers}x 64QAM (CQI 12)` : '64QAM (CQI 12)',
-      mimoLayers: effectiveDlLayers
+      dlMcs: dlCqiStr[0],
+      ulMcs: ulModStr[0],
+      mimoLayers: dlLa[0].rank
     },
     {
       pointName: 'Medium Cell range',
-      description: 'Nominal Coverage Area (Typical user condition, 64QAM DL, 16QAM UL, Rank 2-4)',
+      description: `Nominal coverage, 50% of R_max (${pointSummary(1)})`,
       rangeKm: distMedKm,
       rangeMeters: Math.round(distMedKm * 1000),
       pathLossDb: plMed,
       ssRsrpDbm: rsrpMed,
       ssRssiDbm: rssiMed,
       ssSinrDb: sinrMed,
-      avgDlMcs: dlMcsMedStr,
-      avgUlMcs: ulMcsMedStr,
+      ulSinrDb: ulSinrMed,
+      avgDlMcs: dlMcsStr[1],
+      avgUlMcs: ulMcsStr[1],
       avgDlBlerPercent: blerMed,
       dlThroughputMbps: Number((dlThrMed * (inputs.caEnabled ? caDlFactor : 1)).toFixed(1)),
       ulThroughputMbps: Number((ulThrMed * (inputs.caEnabled ? caUlFactor : 1)).toFixed(1)),
       latencyMs: serviceResolved.targetLatencyMs !== undefined ? Number((serviceResolved.targetLatencyMs * 0.7).toFixed(1)) : latMed,
-      dlMcs: '64QAM (CQI 9)',
-      ulMcs: '16QAM (CQI 7)',
-      mimoLayers: Math.min(effectiveDlLayers, 2)
+      dlMcs: dlCqiStr[1],
+      ulMcs: ulModStr[1],
+      mimoLayers: dlLa[1].rank
     },
     {
       pointName: 'Bad radio conditions',
-      description: 'Degraded Channel (High inter-cell interference or deep clutter, 16QAM/QPSK)',
+      description: `Degraded channel, 78% of R_max with extra clutter loss (${pointSummary(2)})`,
       rangeKm: distBadKm,
       rangeMeters: Math.round(distBadKm * 1000),
       pathLossDb: plBad,
       ssRsrpDbm: rsrpBad,
       ssRssiDbm: rssiBad,
       ssSinrDb: sinrBad,
-      avgDlMcs: dlMcsBadStr,
-      avgUlMcs: ulMcsBadStr,
+      ulSinrDb: ulSinrBad,
+      avgDlMcs: dlMcsStr[2],
+      avgUlMcs: ulMcsStr[2],
       avgDlBlerPercent: blerBad,
       dlThroughputMbps: dlThrBad,
       ulThroughputMbps: ulThrBad,
       latencyMs: serviceResolved.targetLatencyMs !== undefined ? Number((serviceResolved.targetLatencyMs * 0.9).toFixed(1)) : latBad,
-      dlMcs: '16QAM/QPSK (CQI 4)',
-      ulMcs: 'QPSK (CQI 3)',
-      mimoLayers: 1
+      dlMcs: dlCqiStr[2],
+      ulMcs: ulModStr[2],
+      mimoLayers: dlLa[2].rank
     },
     {
       pointName: 'Cell edge',
@@ -1312,20 +1408,27 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
       pathLossDb: plEdge,
       ssRsrpDbm: rsrpEdge,
       ssRssiDbm: rssiEdge,
-      ssSinrDb: dlTargetSinrCellEdgeDb,
+      ssSinrDb: sinrEdge,
+      ulSinrDb: ulSinrEdge,
       avgDlMcs: serviceResolved.serviceProfile === 'VONR_5G' || serviceResolved.serviceProfile === 'VOLTE_4G'
         ? 'QPSK (VoIP RoHC)'
-        : (serviceResolved.serviceProfile === 'NBIOT_4G' ? 'QPSK / BPSK (NPDSCH)' : dlMcsEdgeStr),
+        : (serviceResolved.serviceProfile === 'NBIOT_4G' ? 'QPSK / BPSK (NPDSCH)' : dlMcsStr[3]),
       avgUlMcs: serviceResolved.serviceProfile === 'VONR_5G' || serviceResolved.serviceProfile === 'VOLTE_4G'
         ? 'QPSK (VoIP Packet)'
-        : (serviceResolved.serviceProfile === 'NBIOT_4G' ? (inputs.nbiotScs === '15KHZ_MULTI' ? 'QPSK Multi-Tone' : 'BPSK/QPSK Single-Tone') : ulMcsEdgeStr),
+        : (serviceResolved.serviceProfile === 'NBIOT_4G' ? (inputs.nbiotScs === '15KHZ_MULTI' ? 'QPSK Multi-Tone' : 'BPSK/QPSK Single-Tone') : ulMcsStr[3]),
       avgDlBlerPercent: serviceResolved.targetResidualBlerPercent,
-      dlThroughputMbps: serviceResolved.targetDlThroughputMbps,
-      ulThroughputMbps: serviceResolved.targetUlThroughputMbps,
+      // Fixed-rate services (voice, NB-IoT) report their service rate; others the rate at the edge SINR,
+      // never below the cell-edge service target the MAPL was dimensioned for
+      dlThroughputMbps: isFixedRateEdgeService
+        ? serviceResolved.targetDlThroughputMbps
+        : Math.max(serviceResolved.targetDlThroughputMbps, calculate3GPPThroughput(inputs.bandwidthMHz, sinrEdge, effectiveDlLayers, dlDutyCycle, false)),
+      ulThroughputMbps: isFixedRateEdgeService
+        ? serviceResolved.targetUlThroughputMbps
+        : Math.max(serviceResolved.targetUlThroughputMbps, calculate3GPPThroughput(inputs.bandwidthMHz, ulSinrEdge, effectiveUlLayers, ulDutyCycle, true)),
       latencyMs: serviceResolved.targetLatencyMs !== undefined ? serviceResolved.targetLatencyMs : latEdge,
-      dlMcs: serviceResolved.serviceProfile === 'VONR_5G' || serviceResolved.serviceProfile === 'VOLTE_4G' ? 'QPSK (VoIP RoHC)' : 'QPSK R=0.15 (CQI 1)',
-      ulMcs: serviceResolved.serviceProfile === 'VONR_5G' || serviceResolved.serviceProfile === 'VOLTE_4G' ? 'QPSK (VoIP)' : 'QPSK R=0.15 (CQI 1)',
-      mimoLayers: 1
+      dlMcs: serviceResolved.serviceProfile === 'VONR_5G' || serviceResolved.serviceProfile === 'VOLTE_4G' ? 'QPSK (VoIP RoHC)' : dlCqiStr[3],
+      ulMcs: serviceResolved.serviceProfile === 'VONR_5G' || serviceResolved.serviceProfile === 'VOLTE_4G' ? 'QPSK (VoIP)' : ulModStr[3],
+      mimoLayers: dlLa[3].rank
     }
   ];
 
@@ -1555,6 +1658,8 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
     totalDlMarginsDb,
     totalUlMarginsDb,
     fourPoints,
+    maxCellRangeCapped,
+    configWarnings,
     cascadeTable,
     caSummary: {
       totalBandwidthMHz: totalAggBwMHz,

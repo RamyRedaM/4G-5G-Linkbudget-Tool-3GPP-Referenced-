@@ -178,6 +178,11 @@ export const FourPointsAnalysisTable: React.FC<FourPointsAnalysisTableProps> = (
                       {pt.ssSinrDb > 0 ? `+${pt.ssSinrDb.toFixed(1)}` : pt.ssSinrDb.toFixed(1)} dB
                     </div>
                     <div className="text-[10px] text-slate-400">{sinrInfo.label}</div>
+                    {pt.ulSinrDb !== undefined && (
+                      <div className="text-[10px] text-emerald-400/80">
+                        UL {pt.ulSinrDb > 0 ? `+${pt.ulSinrDb.toFixed(1)}` : pt.ulSinrDb.toFixed(1)} dB
+                      </div>
+                    )}
                   </td>
 
                   {/* Avg. DL MCS */}
@@ -186,7 +191,7 @@ export const FourPointsAnalysisTable: React.FC<FourPointsAnalysisTableProps> = (
                       {pt.avgDlMcs}
                     </div>
                     <div className="text-[10px] text-slate-500 font-sans">
-                      {idx === 0 ? 'Peak Rank ' + pt.mimoLayers : idx === 1 ? 'Rank 2-4' : 'Rank 1 SISO'}
+                      {pt.dlMcs} · Rank {pt.mimoLayers}
                     </div>
                   </td>
 
@@ -196,7 +201,7 @@ export const FourPointsAnalysisTable: React.FC<FourPointsAnalysisTableProps> = (
                       {pt.avgUlMcs}
                     </div>
                     <div className="text-[10px] text-slate-500 font-sans">
-                      {idx > 1 ? '1 PRB PUSCH' : 'Full / Multi-PRB'}
+                      {pt.ulMcs}
                     </div>
                   </td>
 

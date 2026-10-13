@@ -18,7 +18,7 @@ import { TELECOM_PRESETS } from './data/telecomPresets';
 import { calculateLinkBudget } from './utils/linkBudgetCalculator';
 import { exportLinkBudgetCsv } from './utils/exportReport';
 import { LinkBudgetInputs } from './types/telecom';
-import { Radio } from 'lucide-react';
+import { Radio, AlertTriangle } from 'lucide-react';
 
 export default function App() {
   // Initialize with the standard 5G NR n78 100MHz 64TR Massive MIMO preset
@@ -75,6 +75,18 @@ export default function App() {
         {activeModule === 'lkb' ? (
           /* LKB Tool Module: Takes user to the LKB inputs and outputs while minimizing other Monte carlo analysis outputs */
           <>
+            {/* Configuration warnings: undefined bandwidth / SCS, propagation model range cap */}
+            {result.configWarnings && result.configWarnings.length > 0 && (
+              <div role="status" className="bg-amber-500/10 border border-amber-500/40 rounded-xl px-4 py-3 space-y-1.5">
+                {result.configWarnings.map(w => (
+                  <p key={w} className="flex items-start gap-2 text-xs text-amber-200 leading-relaxed">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <span>{w}</span>
+                  </p>
+                ))}
+              </div>
+            )}
+
             {/* KPI Overview Bar & Physical RF Topology Visualization */}
             <LinkBudgetOverview result={result} inputs={inputs} />
 

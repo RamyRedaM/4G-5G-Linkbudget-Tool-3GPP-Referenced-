@@ -313,7 +313,8 @@ export interface FourPointOutput {
   pathLossDb: number;
   ssRsrpDbm: number;
   ssRssiDbm: number; // Received Signal Strength Indicator (in dBm)
-  ssSinrDb: number;
+  ssSinrDb: number; // DL SINR at the design coverage probability
+  ulSinrDb?: number; // UL SINR at the design coverage probability
   avgDlMcs: string; // Average DL Modulation and Coding Scheme (e.g. MCS 27 [256QAM])
   avgUlMcs: string; // Average UL Modulation and Coding Scheme (e.g. MCS 19 [64QAM])
   avgDlBlerPercent: number; // Average DL Block Error Rate percentage
@@ -435,4 +436,6 @@ export interface LinkBudgetCalculationResult {
 
   // Interference Calculation Summary (3GPP TR 36.942 / TR 38.901 / ITU-R M.2412)
   interferenceSummary: InterferenceCalculationSummary;
+  maxCellRangeCapped?: boolean; // true when R_max is limited by the propagation model validity range
+  configWarnings?: string[]; // configuration warnings (undefined bandwidth / SCS, model range cap)
 }

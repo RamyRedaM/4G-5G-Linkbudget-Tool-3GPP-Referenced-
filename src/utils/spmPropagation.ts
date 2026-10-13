@@ -107,6 +107,49 @@ export function getClutterOffsetDb(clutter: EnvironmentClutter): number {
   }
 }
 
+const SPEED_OF_LIGHT = 3.0e8;
+const RMA_BUILDING_HEIGHT_M = 5.0;
+const RMA_STREET_WIDTH_M = 20.0;
+
+/**
+ * UMa / UMi LOS breakpoint distance d'BP = 4 * h'BS * h'UT * fc / c (TR 38.901 Table 7.4.1-1 note 1),
+ * with effective antenna heights h' = h - hE and environment height hE = 1 m.
+ */
+export function getUmaUmiBreakpointMeters(hbMeters: number, hmMeters: number, fGhz: number): number {
+  const hBsEff = Math.max(0.1, hbMeters - 1.0);
+  const hUtEff = Math.max(0.1, hmMeters - 1.0);
+  return (4 * hBsEff * hUtEff * fGhz * 1e9) / SPEED_OF_LIGHT;
+}
+
+export interface PropagationModelValidity {
+  maxDistanceKm: number;
+  reference: string;
+}
+
+/**
+ * Maximum 2D distance for which a propagation model is defined. Returns null for models without a fixed limit
+ * (FSPL, and SPM which is calibrated per network).
+ */
+export function getPropagationModelValidity(
+  model: PropagationModelType,
+  scenario: IndoorOutdoorScenario
+): PropagationModelValidity | null {
+  switch (model) {
+    case '3GPP_UMA':
+      return { maxDistanceKm: 5, reference: 'TR 38.901 UMa: 10 m ≤ d2D ≤ 5 km' };
+    case '3GPP_UMI':
+      return { maxDistanceKm: 5, reference: 'TR 38.901 UMi: 10 m ≤ d2D ≤ 5 km' };
+    case '3GPP_RMA':
+      return scenario === 'OUTDOOR_LOS'
+        ? { maxDistanceKm: 10, reference: 'TR 38.901 RMa LOS: 10 m ≤ d2D ≤ 10 km' }
+        : { maxDistanceKm: 5, reference: 'TR 38.901 RMa NLOS: 10 m ≤ d2D ≤ 5 km' };
+    case 'COST231_HATA':
+      return { maxDistanceKm: 20, reference: 'COST-231 Hata: 1 km ≤ d ≤ 20 km' };
+    default:
+      return null;
+  }
+}
+
 /**
  * Calculate path loss in dB for a given 2D distance in kilometers.
  * Supports both median path loss and effective path loss with Log-Normal Shadowing.
@@ -138,9 +181,15 @@ export function calculatePathLoss(
     }
 
     case '3GPP_UMA': {
-      // 3GPP TR 38.901 Urban Macro (UMa)
-      const d3dMeters = Math.sqrt(Math.pow(d * 1000, 2) + Math.pow(hb - hm, 2));
-      const plLos = 28.0 + 22.0 * Math.log10(d3dMeters) + 20.0 * Math.log10(fGhz);
+      // 3GPP TR 38.901 Urban Macro (UMa), Table 7.4.1-1
+      const d2dMeters = d * 1000;
+      const d3dMeters = Math.sqrt(Math.pow(d2dMeters, 2) + Math.pow(hb - hm, 2));
+      // Dual-slope LOS: PL1 up to the breakpoint d'BP, PL2 beyond it
+      const dBpMeters = getUmaUmiBreakpointMeters(hb, hm, fGhz);
+      const plLos = d2dMeters <= dBpMeters
+        ? 28.0 + 22.0 * Math.log10(d3dMeters) + 20.0 * Math.log10(fGhz)
+        : 28.0 + 40.0 * Math.log10(d3dMeters) + 20.0 * Math.log10(fGhz)
+          - 9.0 * Math.log10(dBpMeters * dBpMeters + Math.pow(hb - hm, 2));
       const plNlos = 13.54 + 39.08 * Math.log10(d3dMeters) + 20.0 * Math.log10(fGhz) - 0.6 * (hm - 1.5);
       
       if (params.scenario === 'OUTDOOR_LOS') {
@@ -152,9 +201,15 @@ export function calculatePathLoss(
     }
 
     case '3GPP_UMI': {
-      // 3GPP TR 38.901 Urban Micro Street Canyon (UMi)
-      const d3dMeters = Math.sqrt(Math.pow(d * 1000, 2) + Math.pow(hb - hm, 2));
-      const plLos = 32.4 + 21.0 * Math.log10(d3dMeters) + 20.0 * Math.log10(fGhz);
+      // 3GPP TR 38.901 Urban Micro Street Canyon (UMi), Table 7.4.1-1
+      const d2dMeters = d * 1000;
+      const d3dMeters = Math.sqrt(Math.pow(d2dMeters, 2) + Math.pow(hb - hm, 2));
+      // Dual-slope LOS: PL1 up to the breakpoint d'BP, PL2 beyond it
+      const dBpMeters = getUmaUmiBreakpointMeters(hb, hm, fGhz);
+      const plLos = d2dMeters <= dBpMeters
+        ? 32.4 + 21.0 * Math.log10(d3dMeters) + 20.0 * Math.log10(fGhz)
+        : 32.4 + 40.0 * Math.log10(d3dMeters) + 20.0 * Math.log10(fGhz)
+          - 9.5 * Math.log10(dBpMeters * dBpMeters + Math.pow(hb - hm, 2));
       const plNlos = 22.4 + 35.3 * Math.log10(d3dMeters) + 21.3 * Math.log10(fGhz) - 0.3 * (hm - 1.5);
 
       if (params.scenario === 'OUTDOOR_LOS') {
@@ -166,12 +221,26 @@ export function calculatePathLoss(
     }
 
     case '3GPP_RMA': {
-      // 3GPP TR 38.901 Rural Macro (RMa)
-      const d3dMeters = Math.sqrt(Math.pow(d * 1000, 2) + Math.pow(hb - hm, 2));
-      const plLos = 20.0 * Math.log10((40 * Math.PI * d3dMeters * fGhz) / 3) + Math.min(0.03 * Math.pow(20, 1.72), 10) * Math.log10(d3dMeters);
-      const plNlos = 161.04 - 7.1 * Math.log10(25) + 7.5 * Math.log10(hb) - (24.37 - 3.7 * Math.pow(hb / 35, 2)) * Math.log10(hb)
-        + (43.42 - 3.1 * Math.log10(hb)) * (Math.log10(d3dMeters) - 3) + 20 * Math.log10(fGhz);
-      
+      // 3GPP TR 38.901 Rural Macro (RMa), Table 7.4.1-1, default h = 5 m avg. building height, W = 20 m street width
+      const h = RMA_BUILDING_HEIGHT_M;
+      const w = RMA_STREET_WIDTH_M;
+      const d2dMeters = d * 1000;
+      const d3dMeters = Math.sqrt(d2dMeters * d2dMeters + Math.pow(hb - hm, 2));
+      const pl1 = (d3d: number) => 20.0 * Math.log10((40 * Math.PI * d3d * fGhz) / 3)
+        + Math.min(0.03 * Math.pow(h, 1.72), 10) * Math.log10(d3d)
+        - Math.min(0.044 * Math.pow(h, 1.72), 14.77)
+        + 0.002 * Math.log10(h) * d3d;
+      // Breakpoint d_BP = 2*pi*h_BS*h_UT*fc/c
+      const dBpMeters = (2 * Math.PI * hb * hm * fGhz * 1e9) / SPEED_OF_LIGHT;
+      const plLos = d2dMeters <= dBpMeters
+        ? pl1(d3dMeters)
+        : pl1(dBpMeters) + 40.0 * Math.log10(d3dMeters / dBpMeters);
+      const plNlos = 161.04 - 7.1 * Math.log10(w) + 7.5 * Math.log10(h)
+        - (24.37 - 3.7 * Math.pow(h / hb, 2)) * Math.log10(hb)
+        + (43.42 - 3.1 * Math.log10(hb)) * (Math.log10(d3dMeters) - 3)
+        + 20 * Math.log10(fGhz)
+        - (3.2 * Math.pow(Math.log10(11.75 * hm), 2) - 4.97);
+
       rawPl = params.scenario === 'OUTDOOR_LOS' ? plLos : Math.max(plLos, plNlos);
       break;
     }
@@ -226,6 +295,15 @@ export function calculateDistanceForPathLoss(
   // Expand high bound if rural or free space
   if (params.clutter === 'RURAL' || params.model === 'FSPL') {
     high = 100.0;
+  }
+
+  // Never extrapolate a model beyond its validity range: the range is capped at the model limit
+  const validity = getPropagationModelValidity(params.model, params.scenario);
+  if (validity) {
+    high = Math.min(high, validity.maxDistanceKm);
+    if (calculatePathLoss(high, params) <= targetPlDb) {
+      return high;
+    }
   }
 
   for (let i = 0; i < 40; i++) {
