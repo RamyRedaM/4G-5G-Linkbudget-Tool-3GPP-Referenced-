@@ -45,8 +45,8 @@ export function exportLinkBudgetCsv(result: LinkBudgetCalculationResult, inputs:
     lines.push(`DL Interference Margin: ${result.interferenceSummary.effectiveDlInterferenceMarginDb.toFixed(1)} dB (Calculated: ${result.interferenceSummary.calculatedDlInterferenceMarginDb.toFixed(1)} dB + Pessimistic: ${result.interferenceSummary.pessimisticMarginOffsetDb.toFixed(1)} dB)`);
     lines.push(`UL IoT Noise Rise Margin: ${result.interferenceSummary.effectiveUlIotMarginDb.toFixed(1)} dB (Calculated: ${result.interferenceSummary.calculatedUlIotMarginDb.toFixed(1)} dB + Pessimistic: ${result.interferenceSummary.pessimisticMarginOffsetDb.toFixed(1)} dB)`);
   }
-  lines.push(`DL Noise Figure: ${(inputs.dlNoiseFigureDb ?? inputs.ueNoiseFigureDb ?? 7.0).toFixed(1)} dB`);
-  lines.push(`UL Noise Figure: ${(inputs.ulNoiseFigureDb ?? inputs.bsNoiseFigureDb ?? 4.0).toFixed(1)} dB`);
+  lines.push(`DL Noise Figure: ${(inputs.ueNoiseFigureDb ?? 7.0).toFixed(1)} dB`);
+  lines.push(`UL Noise Figure: ${(inputs.bsNoiseFigureDb ?? 4.0).toFixed(1)} dB`);
   lines.push(`DL Thermal Noise per Subcarrier: ${result.rxSensitivityBreakdown.dl.thermalNoisePerSubcarrierDbm.toFixed(2)} dBm/SC (${result.rxSensitivityBreakdown.dl.scsKhz} kHz SCS)`);
   lines.push(`DL Received Subcarriers: ${result.rxSensitivityBreakdown.dl.receivedSubcarriers} SCs`);
   lines.push(`DL Required SNR @ Cell Edge: ${result.rxSensitivityBreakdown.dl.requiredSnrDb.toFixed(1)} dB`);

@@ -102,7 +102,7 @@ export const LinkBudgetOverview: React.FC<LinkBudgetOverviewProps> = ({ result, 
             <span className="text-emerald-300 font-mono font-medium">
               {result.maxCellRangeMeters.toLocaleString()} m
             </span>{' '}
-            at {inputs.coverageProbability}% cell edge target
+            at {(inputs.coverageProbabilityType ?? 'AREA') === 'AREA' ? `${inputs.coverageProbability}% area (${result.coverageEdgeProbabilityPercent}% edge)` : `${inputs.coverageProbability}% cell edge`} target
           </div>
           <div className="mt-2 pt-2 border-t border-slate-800/80 text-[10px] font-mono flex items-center justify-between">
             <span className="text-slate-400 truncate max-w-[160px]" title={result.serviceSummary.displayName}>

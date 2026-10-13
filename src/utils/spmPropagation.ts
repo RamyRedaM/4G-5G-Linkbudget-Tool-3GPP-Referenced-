@@ -56,6 +56,48 @@ export function calculateShadowFadingMargin(
 }
 
 /**
+ * Fraction of the cell AREA with signal above threshold, given the cell-EDGE coverage probability (Jakes, 1974):
+ * F_u = ½·[1 − erf(a) + exp((1 − 2ab)/b²)·(1 − erf((1 − ab)/b))], a = −z_edge/√2, b = 10·n·log10(e)/(σ·√2),
+ * with n the path-loss exponent near the cell edge and σ the shadow fading standard deviation.
+ */
+export function jakesAreaCoverage(edgeProbabilityPercent: number, sigmaDb: number, pathLossExponent: number): number {
+  if (sigmaDb < 0.1) return edgeProbabilityPercent >= 50 ? 100 : 0;
+  const z = getGaussianZ(edgeProbabilityPercent);
+  const a = -z / Math.SQRT2;
+  const b = (10 * Math.max(1.5, pathLossExponent) * Math.LOG10E) / (sigmaDb * Math.SQRT2);
+  const fu = 0.5 * (1 - erf(a) + Math.exp((1 - 2 * a * b) / (b * b)) * (1 - erf((1 - a * b) / b)));
+  return Math.min(100, Math.max(0, fu * 100));
+}
+
+/** Cell-edge coverage probability (%) that gives the requested AREA coverage probability (inverse of jakesAreaCoverage). */
+export function edgeProbabilityForAreaCoverage(areaProbabilityPercent: number, sigmaDb: number, pathLossExponent: number): number {
+  if (sigmaDb < 0.1) return 50;
+  let lo = 50;
+  let hi = 99.9;
+  if (jakesAreaCoverage(lo, sigmaDb, pathLossExponent) >= areaProbabilityPercent) return lo;
+  if (jakesAreaCoverage(hi, sigmaDb, pathLossExponent) <= areaProbabilityPercent) return hi;
+  for (let i = 0; i < 50; i++) {
+    const mid = (lo + hi) / 2;
+    if (jakesAreaCoverage(mid, sigmaDb, pathLossExponent) < areaProbabilityPercent) lo = mid; else hi = mid;
+  }
+  return Number(((lo + hi) / 2).toFixed(2));
+}
+
+/** Error function (Abramowitz & Stegun 7.1.26, |error| < 1.5e-7). */
+function erf(x: number): number {
+  const sign = x < 0 ? -1 : 1;
+  const t = 1 / (1 + 0.3275911 * Math.abs(x));
+  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+  return sign * y;
+}
+
+/** Local path-loss exponent n at distance d (km): PL slope over d/1.2 … 1.2·d divided by 10·log10(1.44). */
+export function getPathLossExponent(distKm: number, params: PropagationParams): number {
+  const d = Math.max(0.05, distKm);
+  return (calculatePathLoss(d * 1.2, params) - calculatePathLoss(d / 1.2, params)) / (10 * Math.log10(1.44));
+}
+
+/**
  * Inverse calculation: determine equivalent log-normal standard deviation (sigma) from margin and coverage probability
  */
 export function calculateStdDevFromMargin(

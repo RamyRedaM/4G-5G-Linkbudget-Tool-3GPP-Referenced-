@@ -419,7 +419,7 @@ export const LinkBudgetDiagram: React.FC<LinkBudgetDiagramProps> = ({ result, in
                 Cell Range (d): <tspan fill="#38bdf8" className="font-mono">{cellRadiusDisplay}</tspan>
               </text>
               <text x="0" y="12" textAnchor="middle" className="font-mono text-[10px]" fill="#94a3b8">
-                {result.maxCellRangeMeters.toLocaleString()} m ({inputs.coverageProbability}% target)
+                {result.maxCellRangeMeters.toLocaleString()} m ({inputs.coverageProbability}% {(inputs.coverageProbabilityType ?? 'AREA') === 'AREA' ? 'area' : 'edge'} target)
               </text>
             </g>
           </g>

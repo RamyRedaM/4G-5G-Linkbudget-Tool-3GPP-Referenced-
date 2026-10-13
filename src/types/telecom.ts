@@ -192,6 +192,7 @@ export interface LinkBudgetInputs {
   // Margins
   coverageProbability: number; // e.g. 90%, 95%
   shadowFadingStdDevDb: number; // Log-normal fading std dev (e.g. 6 to 10 dB)
+  coverageProbabilityType?: 'AREA' | 'EDGE'; // coverageProbability is over the cell area (default) or at the cell edge
   shadowFadingSigmaMode?: 'AUTO_TR38901' | 'MANUAL'; // AUTO: σ from TR 38.901 Table 7.4.1-1 for 3GPP models (default for them)
   bsAntennaGainIncludesArrayGain?: boolean; // true: BS antenna gain is the AAU beam gain (includes array gain); default true for AAU configs
   shadowFadingMarginDb?: number; // Shadow Fading Margin (dB): user-defined or calculated from log-normal std dev (sigma) based on urban/rural environments
@@ -215,8 +216,8 @@ export interface LinkBudgetInputs {
   interferenceAutoSyncIsd?: boolean; // When true, ISD automatically scales with cell range * multiplier
 
   // Systems Overhead & Receiver Noise Figures (3GPP Rel-15/16/17)
-  dlNoiseFigureDb?: number; // Noise figure in DL (dB): default 7 dB (user input)
-  ulNoiseFigureDb?: number; // Noise figure in UL (dB): default 4 dB (user input)
+  dlNoiseFigureDb?: number; // Deprecated, ignored: the UE noise figure (ueNoiseFigureDb) is used
+  ulNoiseFigureDb?: number; // Deprecated, ignored: the BS noise figure (bsNoiseFigureDb) is used
   csiRsReportsPerPeriod?: number; // Number of CSI-RS reports within report period: 1 to 5
   csiRsCaPeriodicitySlots?: number; // CSI-RS for CA periodicity (slots): 10, 20, 40, 80
 
@@ -441,6 +442,10 @@ export interface LinkBudgetCalculationResult {
 
   // Interference Calculation Summary (3GPP TR 36.942 / TR 38.901 / ITU-R M.2412)
   interferenceSummary: InterferenceCalculationSummary;
+  coverageProbabilityType?: 'AREA' | 'EDGE';
+  coverageEdgeProbabilityPercent?: number; // cell-edge probability the shadow fading margin is based on
+  coverageAreaProbabilityPercent?: number; // equivalent area coverage (Jakes)
+  pathLossExponentAtEdge?: number;
   effectiveShadowFadingStdDevDb?: number; // σ actually used for the shadow fading margin
   shadowFadingSigmaSource?: string; // where σ came from (TR 38.901 table or user input)
   maxCellRangeCapped?: boolean; // true when R_max is limited by the propagation model validity range

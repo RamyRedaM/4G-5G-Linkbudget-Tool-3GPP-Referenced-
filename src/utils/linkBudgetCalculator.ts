@@ -25,7 +25,10 @@ import {
   calculateShadowFadingMargin,
   getPropagationModelValidity,
   getTr38901ShadowFadingSigmaDb,
-  getPenetrationLossSigmaDb
+  getPenetrationLossSigmaDb,
+  getPathLossExponent,
+  edgeProbabilityForAreaCoverage,
+  jakesAreaCoverage
 } from './spmPropagation';
 import { calculateInterferenceSummary } from './interferenceCalculator';
 
@@ -1014,12 +1017,12 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
   const ulAllocPrbs = serviceResolved.ulAllocatedPrbs;
 
   // Noise Figures (NF in dB)
-  const dlNoiseFigure = inputs.dlNoiseFigureDb ?? (
+  // One noise figure per side: the UE NF (NB-IoT and RedCap devices use their category values) and the BS NF
+  const dlNoiseFigure =
     serviceResolved.serviceProfile === 'NBIOT_4G' ? 9.0 :
     serviceResolved.serviceProfile === 'REDCAP_5G' ? 8.0 :
-    (inputs.ueNoiseFigureDb ?? 7.0)
-  );
-  const ulNoiseFigure = inputs.ulNoiseFigureDb ?? inputs.bsNoiseFigureDb ?? 4.0;
+    (inputs.ueNoiseFigureDb ?? 7.0);
+  const ulNoiseFigure = inputs.bsNoiseFigureDb ?? 4.0;
 
   // Required SNR at Cell Edge (dB) resolved from selected service
   const dlTargetSinrCellEdgeDb = serviceResolved.dlRequiredSnrDb;
@@ -1058,16 +1061,41 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
   const shadowFadingSigmaSource = useTr38901Sigma
     ? `TR 38.901 Table 7.4.1-1 (${inputs.propagationModel.replace('3GPP_', '')}, ${inputs.indoorOutdoorScenario.replace(/_/g, ' ').toLowerCase()}${getPenetrationLossSigmaDb(inputs.indoorOutdoorScenario) > 0 ? ', incl. O2I σ_P' : ''})`
     : 'User input';
-  const shadowFadingMarginDb = (inputs.shadowFadingMarginDb !== undefined && inputs.shadowFadingMarginDb !== null && !isNaN(inputs.shadowFadingMarginDb))
+  // Coverage target: AREA (default) is converted to the equivalent cell-EDGE probability with the Jakes formula,
+  // using the path-loss exponent of the propagation model near the cell edge (refined once the range is known)
+  const coverageProbabilityType = inputs.coverageProbabilityType ?? 'AREA';
+  const slopeParams = {
+    freqMHz: dlFreqMHz,
+    hbMeters: inputs.bsHeightMeters,
+    hmMeters: inputs.ueHeightMeters,
+    model: inputs.propagationModel,
+    clutter: inputs.environmentClutter,
+    scenario: inputs.indoorOutdoorScenario,
+    additionalPenetrationLossDb: inputs.additionalPenetrationLossDb,
+    foliageLossDb: inputs.foliageLossDb,
+    spmK1Override: inputs.spmK1,
+    spmK2Override: inputs.spmK2
+  };
+  const sfmOverride = inputs.shadowFadingMarginDb !== undefined && inputs.shadowFadingMarginDb !== null && !isNaN(inputs.shadowFadingMarginDb);
+  const edgeProbabilityAt = (distKm: number) => {
+    const n = getPathLossExponent(distKm, slopeParams);
+    const edge = coverageProbabilityType === 'AREA'
+      ? edgeProbabilityForAreaCoverage(inputs.coverageProbability, effectiveShadowFadingStdDevDb, n)
+      : inputs.coverageProbability;
+    return { n, edge };
+  };
+  let coverageLevels = edgeProbabilityAt(1.0);
+  let shadowFadingMarginDb = sfmOverride
     ? Number(inputs.shadowFadingMarginDb)
-    : calculateShadowFadingMargin(
-        effectiveShadowFadingStdDevDb,
-        inputs.coverageProbability
-      );
+    : calculateShadowFadingMargin(effectiveShadowFadingStdDevDb, coverageLevels.edge);
 
   // Fast / Multipath Fading Margin (Rayleigh / Rician small-scale multipath allowance)
-  const dlFadingMarginDb = inputs.dlFadingMarginDb ?? 2.0;
-  const ulFadingMarginDb = inputs.ulFadingMarginDb ?? 2.5;
+  // Fast-fading margin: 0 dB by default for data services, where HARQ and the BLER target already absorb fast fading;
+  // 2.0 / 2.5 dB for voice, MCPTT and NB-IoT. An entered value always wins.
+  const isDataService = ['MBB_PS_DATA', 'REDCAP_5G'].includes(serviceResolved.serviceProfile)
+    || (serviceResolved.serviceProfile === 'MCX_PUBLIC_SAFETY' && (inputs.mcxProfile ?? 'MCPTT') !== 'MCPTT');
+  const dlFadingMarginDb = inputs.dlFadingMarginDb ?? (isDataService ? 0.0 : 2.0);
+  const ulFadingMarginDb = inputs.ulFadingMarginDb ?? (isDataService ? 0.0 : 2.5);
 
   // Tentative cell range estimation for geometric Inter-Site Distance (ISD = 1.5 * R)
   const tentativeRawMapl = Math.min(
@@ -1089,6 +1117,16 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
     coverageProbability: inputs.coverageProbability
   });
   const tentativeCellRangeMeters = Math.max(100, Math.round(tentativeRangeKm * 1000));
+
+  // Refine the area -> edge conversion with the path-loss exponent at the (tentative) cell edge
+  coverageLevels = edgeProbabilityAt(tentativeRangeKm);
+  if (!sfmOverride) {
+    shadowFadingMarginDb = calculateShadowFadingMargin(effectiveShadowFadingStdDevDb, coverageLevels.edge);
+  }
+  const coverageEdgeProbabilityPercent = Number(coverageLevels.edge.toFixed(1));
+  const coverageAreaProbabilityPercent = Number((coverageProbabilityType === 'AREA'
+    ? inputs.coverageProbability
+    : jakesAreaCoverage(inputs.coverageProbability, effectiveShadowFadingStdDevDb, coverageLevels.n)).toFixed(1));
 
   // 3GPP TR 36.942 / TR 38.901 / ITU-R M.2412 Interference Summary & Cell Loading Calculation:
   const interferenceSummary = calculateInterferenceSummary(
@@ -1676,11 +1714,11 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
     },
     {
       name: 'Shadow Fading Margin (M_SF)',
-      dlValue: `${shadowFadingMarginDb.toFixed(1)} dB (P=${inputs.coverageProbability}%)`,
-      ulValue: `${shadowFadingMarginDb.toFixed(1)} dB (P=${inputs.coverageProbability}%)`,
+      dlValue: `${shadowFadingMarginDb.toFixed(1)} dB (P=${coverageProbabilityType === 'AREA' ? `${inputs.coverageProbability}% area = ${coverageEdgeProbabilityPercent}% edge` : `${inputs.coverageProbability}% edge`})`,
+      ulValue: `${shadowFadingMarginDb.toFixed(1)} dB (P=${coverageProbabilityType === 'AREA' ? `${inputs.coverageProbability}% area = ${coverageEdgeProbabilityPercent}% edge` : `${inputs.coverageProbability}% edge`})`,
       unit: 'dB',
       category: 'MARGINS',
-      description: `Log-normal slow fading margin derived from urban/rural σ=${effectiveShadowFadingStdDevDb.toFixed(1)} dB at ${inputs.coverageProbability}% cell edge probability`
+      description: `Log-normal slow fading margin derived from urban/rural σ=${effectiveShadowFadingStdDevDb.toFixed(1)} dB at ${coverageProbabilityType === 'AREA' ? `${inputs.coverageProbability}% area = ${coverageEdgeProbabilityPercent}% edge` : `${inputs.coverageProbability}% edge`} coverage probability (Jakes area-to-edge conversion, n=${coverageLevels.n.toFixed(2)})`
     },
     {
       name: 'Multipath / Fast Fading Margin',
@@ -1720,7 +1758,7 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
       ulValue: `${maxCellRangeKm.toFixed(3)} km (${maxCellRangeMeters.toLocaleString()} m)`,
       unit: 'km',
       category: 'RESULT',
-      description: `Calculated cell edge boundary satisfying ${serviceResolved.displayName} at P_cov=${inputs.coverageProbability}%`
+      description: `Calculated cell edge boundary satisfying ${serviceResolved.displayName} at P_cov=${coverageProbabilityType === 'AREA' ? `${inputs.coverageProbability}% area = ${coverageEdgeProbabilityPercent}% edge` : `${inputs.coverageProbability}% edge`}`
     }
   ];
 
@@ -1748,6 +1786,10 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
     configWarnings,
     effectiveShadowFadingStdDevDb,
     shadowFadingSigmaSource,
+    coverageProbabilityType,
+    coverageEdgeProbabilityPercent,
+    coverageAreaProbabilityPercent,
+    pathLossExponentAtEdge: Number(coverageLevels.n.toFixed(2)),
     cascadeTable,
     caSummary: {
       totalBandwidthMHz: totalAggBwMHz,

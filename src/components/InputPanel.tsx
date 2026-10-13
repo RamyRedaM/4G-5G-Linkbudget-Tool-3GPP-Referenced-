@@ -78,10 +78,18 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
     const sigmaManual = 'shadowFadingStdDevDb' in partial && !('shadowFadingSigmaMode' in partial)
       ? { shadowFadingSigmaMode: 'MANUAL' as const }
       : {};
-    onChange({ ...inputs, ...partial, ...sigmaManual });
+    // A margin sent together with σ or the coverage target is derived, not an override: let the engine compute it
+    // (it applies the area -> edge conversion)
+    const derivedMargin = ('shadowFadingStdDevDb' in partial || 'coverageProbability' in partial || 'coverageProbabilityType' in partial)
+      ? { shadowFadingMarginDb: undefined }
+      : {};
+    onChange({ ...inputs, ...partial, ...sigmaManual, ...derivedMargin });
   };
   // σ actually used by the link budget (TR 38.901 table in AUTO mode, else the user's value)
   const sigmaEff = lbResult.effectiveShadowFadingStdDevDb ?? inputs.shadowFadingStdDevDb;
+  // Cell-edge probability the margin is based on (area target converted with the Jakes formula)
+  const edgeProbEff = lbResult.coverageEdgeProbabilityPercent ?? inputs.coverageProbability;
+  const coverageIsArea = (inputs.coverageProbabilityType ?? 'AREA') === 'AREA';
   const tr38901SigmaAvailable = getTr38901ShadowFadingSigmaDb(inputs.propagationModel, inputs.indoorOutdoorScenario) !== null;
 
   const handleServiceProfileChange = (newProfile: ServiceProfileType) => {
@@ -284,7 +292,6 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
       ueAntennaGainDbi: gain,
       bodyLossDb: bodyLoss,
       ueNoiseFigureDb: nf,
-      dlNoiseFigureDb: nf,
       ueHeightMeters: height,
       ueMimoMode: mimoMode
     });
@@ -301,7 +308,6 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
           ueAntennaGainDbi: 0,
           bodyLossDb: 3,
           ueNoiseFigureDb: 7.0,
-          dlNoiseFigureDb: 7.0,
           ueHeightMeters: 1.5
         });
         break;
@@ -314,7 +320,6 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
           ueAntennaGainDbi: 0,
           bodyLossDb: 3,
           ueNoiseFigureDb: 7.5,
-          dlNoiseFigureDb: 7.5,
           ueHeightMeters: 1.5
         });
         break;
@@ -327,7 +332,6 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
           ueAntennaGainDbi: 0,
           bodyLossDb: 3,
           ueNoiseFigureDb: 8.0,
-          dlNoiseFigureDb: 8.0,
           ueHeightMeters: 1.5
         });
         break;
@@ -340,7 +344,6 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
           ueAntennaGainDbi: 0,
           bodyLossDb: 3,
           ueNoiseFigureDb: 7.5,
-          dlNoiseFigureDb: 7.5,
           ueHeightMeters: 1.5
         });
         break;
@@ -353,7 +356,6 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
           ueAntennaGainDbi: 12,
           bodyLossDb: 0,
           ueNoiseFigureDb: 5.0,
-          dlNoiseFigureDb: 5.0,
           ueHeightMeters: 8.0
         });
         break;
@@ -366,7 +368,6 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
           ueAntennaGainDbi: 4,
           bodyLossDb: 0,
           ueNoiseFigureDb: 6.0,
-          dlNoiseFigureDb: 6.0,
           ueHeightMeters: 2.0
         });
         break;
@@ -379,7 +380,6 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
           ueAntennaGainDbi: 5,
           bodyLossDb: 0,
           ueNoiseFigureDb: 6.0,
-          dlNoiseFigureDb: 6.0,
           ueHeightMeters: 2.5
         });
         break;
@@ -392,7 +392,6 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
           ueAntennaGainDbi: 18,
           bodyLossDb: 0,
           ueNoiseFigureDb: 8.5,
-          dlNoiseFigureDb: 8.5,
           ueHeightMeters: 6.0
         });
         break;
@@ -405,7 +404,6 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
           ueAntennaGainDbi: 0,
           bodyLossDb: 2,
           ueNoiseFigureDb: 8.5,
-          dlNoiseFigureDb: 8.5,
           ueHeightMeters: 1.2
         });
         break;
@@ -418,7 +416,6 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
           ueAntennaGainDbi: 0,
           bodyLossDb: 3,
           ueNoiseFigureDb: 7.5,
-          dlNoiseFigureDb: 7.5,
           ueHeightMeters: 1.5
         });
         break;
@@ -431,7 +428,6 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
           ueAntennaGainDbi: 0,
           bodyLossDb: 3,
           ueNoiseFigureDb: 8.0,
-          dlNoiseFigureDb: 8.0,
           ueHeightMeters: 1.5
         });
         break;
@@ -444,7 +440,6 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
           ueAntennaGainDbi: 0,
           bodyLossDb: 3,
           ueNoiseFigureDb: 9.0,
-          dlNoiseFigureDb: 9.0,
           ueHeightMeters: 1.5
         });
         break;
@@ -457,7 +452,6 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
           ueAntennaGainDbi: 0,
           bodyLossDb: 0,
           ueNoiseFigureDb: 9.0,
-          dlNoiseFigureDb: 9.0,
           ueHeightMeters: 1.0
         });
         break;
@@ -2158,7 +2152,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                         Noise figure in DL
                       </label>
                       <span className="text-xs font-mono font-bold text-cyan-400">
-                        {inputs.dlNoiseFigureDb ?? inputs.ueNoiseFigureDb ?? 7} dB
+                        {inputs.ueNoiseFigureDb ?? 7} dB
                       </span>
                     </div>
                     <p className="text-[10px] text-slate-500 font-mono mb-2">
@@ -2171,10 +2165,10 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                       min="1"
                       max="20"
                       step="0.5"
-                      value={inputs.dlNoiseFigureDb ?? inputs.ueNoiseFigureDb ?? 7}
+                      value={inputs.ueNoiseFigureDb ?? 7}
                       onChange={(e) => {
                         const val = Math.max(0.1, Number(e.target.value));
-                        update({ dlNoiseFigureDb: val, ueNoiseFigureDb: val });
+                        update({ ueNoiseFigureDb: val });
                       }}
                       className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-100 font-mono focus:border-cyan-400 focus:outline-none"
                       placeholder="7"
@@ -2191,7 +2185,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                         Noise figure in UL
                       </label>
                       <span className="text-xs font-mono font-bold text-emerald-400">
-                        {inputs.ulNoiseFigureDb ?? inputs.bsNoiseFigureDb ?? 4} dB
+                        {inputs.bsNoiseFigureDb ?? 4} dB
                       </span>
                     </div>
                     <p className="text-[10px] text-slate-500 font-mono mb-2">
@@ -2204,10 +2198,10 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                       min="1"
                       max="15"
                       step="0.5"
-                      value={inputs.ulNoiseFigureDb ?? inputs.bsNoiseFigureDb ?? 4}
+                      value={inputs.bsNoiseFigureDb ?? 4}
                       onChange={(e) => {
                         const val = Math.max(0.1, Number(e.target.value));
-                        update({ ulNoiseFigureDb: val, bsNoiseFigureDb: val });
+                        update({ bsNoiseFigureDb: val });
                       }}
                       className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-100 font-mono focus:border-cyan-400 focus:outline-none"
                       placeholder="4"
@@ -2645,7 +2639,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                           Noise figure in DL
                         </label>
                         <span className="text-xs font-mono font-bold text-cyan-400">
-                          {inputs.dlNoiseFigureDb ?? inputs.ueNoiseFigureDb ?? 7} dB
+                          {inputs.ueNoiseFigureDb ?? 7} dB
                         </span>
                       </div>
                       <p className="text-[10px] text-slate-500 font-mono mb-2">
@@ -2658,10 +2652,10 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                         min="1"
                         max="20"
                         step="0.5"
-                        value={inputs.dlNoiseFigureDb ?? inputs.ueNoiseFigureDb ?? 7}
+                        value={inputs.ueNoiseFigureDb ?? 7}
                         onChange={(e) => {
                           const val = Math.max(0.1, Number(e.target.value));
-                          update({ dlNoiseFigureDb: val, ueNoiseFigureDb: val });
+                          update({ ueNoiseFigureDb: val });
                         }}
                         className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-100 font-mono focus:border-cyan-400 focus:outline-none"
                         placeholder="7"
@@ -2678,7 +2672,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                           Noise figure in UL
                         </label>
                         <span className="text-xs font-mono font-bold text-emerald-400">
-                          {inputs.ulNoiseFigureDb ?? inputs.bsNoiseFigureDb ?? 4} dB
+                          {inputs.bsNoiseFigureDb ?? 4} dB
                         </span>
                       </div>
                       <p className="text-[10px] text-slate-500 font-mono mb-2">
@@ -2691,10 +2685,10 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                         min="1"
                         max="15"
                         step="0.5"
-                        value={inputs.ulNoiseFigureDb ?? inputs.bsNoiseFigureDb ?? 4}
+                        value={inputs.bsNoiseFigureDb ?? 4}
                         onChange={(e) => {
                           const val = Math.max(0.1, Number(e.target.value));
-                          update({ ulNoiseFigureDb: val, bsNoiseFigureDb: val });
+                          update({ bsNoiseFigureDb: val });
                         }}
                         className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-100 font-mono focus:border-cyan-400 focus:outline-none"
                         placeholder="4"
@@ -3175,7 +3169,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
               <div className="flex justify-between items-center mb-1">
                 <span className="text-slate-400">Noise Figure in UL (gNB/eNB)</span>
                 <span className="text-emerald-400 font-bold">
-                  {inputs.ulNoiseFigureDb ?? inputs.bsNoiseFigureDb ?? 4} dB
+                  {inputs.bsNoiseFigureDb ?? 4} dB
                 </span>
               </div>
               <div className="mt-1 flex items-center gap-2">
@@ -3184,10 +3178,10 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                   min="1"
                   max="15"
                   step="0.5"
-                  value={inputs.ulNoiseFigureDb ?? inputs.bsNoiseFigureDb ?? 4}
+                  value={inputs.bsNoiseFigureDb ?? 4}
                   onChange={(e) => {
                     const val = Math.max(0.1, Number(e.target.value));
-                    update({ ulNoiseFigureDb: val, bsNoiseFigureDb: val });
+                    update({ bsNoiseFigureDb: val });
                   }}
                   className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-100 text-xs font-mono focus:border-cyan-400 focus:outline-none"
                   placeholder="4"
@@ -3709,7 +3703,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                   Noise Figure in DL (UE NF)
                 </label>
                 <span className="text-xs font-mono font-semibold text-cyan-400">
-                  {inputs.dlNoiseFigureDb ?? inputs.ueNoiseFigureDb ?? 7} dB
+                  {inputs.ueNoiseFigureDb ?? 7} dB
                 </span>
               </div>
               <input
@@ -3717,10 +3711,10 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                 min="2"
                 max="14"
                 step="0.5"
-                value={inputs.dlNoiseFigureDb ?? inputs.ueNoiseFigureDb ?? 7}
+                value={inputs.ueNoiseFigureDb ?? 7}
                 onChange={(e) => {
                   const val = Number(e.target.value);
-                  update({ dlNoiseFigureDb: val, ueNoiseFigureDb: val });
+                  update({ ueNoiseFigureDb: val });
                 }}
                 className="w-full accent-cyan-400 cursor-pointer"
               />
@@ -3851,7 +3845,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                       <button
                         type="button"
                         onClick={() => {
-                          const margin = calculateShadowFadingMargin(5.5, inputs.coverageProbability);
+                          const margin = calculateShadowFadingMargin(5.5, edgeProbEff);
                           update({
                             shadowFadingStdDevDb: 5.5,
                             shadowFadingMarginDb: margin,
@@ -3869,7 +3863,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                       <button
                         type="button"
                         onClick={() => {
-                          const margin = calculateShadowFadingMargin(3.0, inputs.coverageProbability);
+                          const margin = calculateShadowFadingMargin(3.0, edgeProbEff);
                           update({
                             shadowFadingStdDevDb: 3.0,
                             shadowFadingMarginDb: margin,
@@ -3903,11 +3897,11 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
 
           {/* Log-Normal Shadow Fading & Margins Panel */}
           {(() => {
-            const calculatedMargin = calculateShadowFadingMargin(sigmaEff, inputs.coverageProbability);
+            const calculatedMargin = calculateShadowFadingMargin(sigmaEff, edgeProbEff);
             const currentMargin = (inputs.shadowFadingMarginDb !== undefined && inputs.shadowFadingMarginDb !== null && !isNaN(inputs.shadowFadingMarginDb))
               ? inputs.shadowFadingMarginDb
               : calculatedMargin;
-            const currentZ = getGaussianZ(inputs.coverageProbability);
+            const currentZ = getGaussianZ(edgeProbEff);
 
             const envPresets = [
               {
@@ -4003,12 +3997,12 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                       <span>Define Standard Deviation by Urban / Rural Environment:</span>
                     </label>
                     <span className="text-[10px] font-mono text-cyan-400">
-                      Target P_cov: {inputs.coverageProbability}%
+                      Target P_cov: {inputs.coverageProbability}% {coverageIsArea ? `area (${edgeProbEff}% edge)` : 'edge'}
                     </span>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
                     {envPresets.map((env) => {
-                      const envMargin = calculateShadowFadingMargin(env.sigma, inputs.coverageProbability);
+                      const envMargin = calculateShadowFadingMargin(env.sigma, edgeProbEff);
                       const isSelected = activeEnv === env.id && Math.abs(sigmaEff - env.sigma) < 0.15;
                       return (
                         <button
@@ -4081,7 +4075,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                           value={currentMargin.toFixed(1)}
                           onChange={(e) => {
                             const val = Math.max(0, Number(e.target.value));
-                            const impliedSigma = calculateStdDevFromMargin(val, inputs.coverageProbability);
+                            const impliedSigma = calculateStdDevFromMargin(val, edgeProbEff);
                             update({
                               shadowFadingMarginDb: val,
                               shadowFadingStdDevDb: impliedSigma,
@@ -4098,7 +4092,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                       <button
                         type="button"
                         onClick={() => {
-                          const theoretical = calculateShadowFadingMargin(sigmaEff, inputs.coverageProbability);
+                          const theoretical = calculateShadowFadingMargin(sigmaEff, edgeProbEff);
                           update({ shadowFadingMarginDb: theoretical });
                         }}
                         className="w-full flex items-center justify-center gap-1 text-[10px] font-mono text-cyan-400/90 hover:text-cyan-200 bg-cyan-950/50 hover:bg-cyan-950/80 border border-cyan-800/60 rounded py-1 transition-colors"
@@ -4136,7 +4130,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                           value={sigmaEff.toFixed(1)}
                           onChange={(e) => {
                             const val = Math.max(0.5, Number(e.target.value));
-                            const newMargin = calculateShadowFadingMargin(val, inputs.coverageProbability);
+                            const newMargin = calculateShadowFadingMargin(val, edgeProbEff);
                             update({
                               shadowFadingStdDevDb: val,
                               shadowFadingMarginDb: newMargin,
@@ -4155,7 +4149,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                         value={sigmaEff}
                         onChange={(e) => {
                           const val = Number(e.target.value);
-                          const newMargin = calculateShadowFadingMargin(val, inputs.coverageProbability);
+                          const newMargin = calculateShadowFadingMargin(val, edgeProbEff);
                           update({
                             shadowFadingStdDevDb: val,
                             shadowFadingMarginDb: newMargin,
@@ -4175,11 +4169,25 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                           Coverage Probability (P_cov)
                         </label>
                         <span className="text-xs font-mono font-bold text-cyan-400">
-                          {inputs.coverageProbability}%
+                          {inputs.coverageProbability}% {coverageIsArea ? 'area' : 'edge'}
                         </span>
                       </div>
+                      <div className="flex rounded-md border border-slate-700 overflow-hidden text-[10px] font-mono mb-1.5 w-fit">
+                        {([['AREA', 'Cell area'], ['EDGE', 'Cell edge']] as const).map(([k, label]) => (
+                          <button
+                            key={k}
+                            type="button"
+                            onClick={() => update({ coverageProbabilityType: k })}
+                            className={`px-2 py-0.5 cursor-pointer ${(inputs.coverageProbabilityType ?? 'AREA') === k ? 'bg-cyan-500 text-slate-950 font-bold' : 'bg-slate-950 text-slate-300'}`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
                       <p className="text-[10px] text-slate-500 font-mono mb-2">
-                        Edge reliability: Gaussian factor z = {currentZ.toFixed(2)}
+                        {coverageIsArea
+                          ? `${inputs.coverageProbability}% area = ${edgeProbEff}% edge (Jakes, n = ${lbResult.pathLossExponentAtEdge}) · z = ${currentZ.toFixed(2)}`
+                          : `${inputs.coverageProbability}% edge = ${lbResult.coverageAreaProbabilityPercent}% area (Jakes) · z = ${currentZ.toFixed(2)}`}
                       </p>
                     </div>
 
@@ -4688,9 +4696,9 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                 </div>
                 <div className="flex items-center gap-2 px-2.5 py-1 bg-slate-900 border border-slate-700 rounded text-xs font-mono">
                   <span className="text-slate-400">Fading Reserve:</span>
-                  <span className="text-cyan-300 font-semibold">DL {inputs.dlFadingMarginDb ?? 2.0} dB</span>
+                  <span className="text-cyan-300 font-semibold">DL {lbResult.dlFadingMarginDb} dB</span>
                   <span className="text-slate-600">|</span>
-                  <span className="text-emerald-300 font-semibold">UL {inputs.ulFadingMarginDb ?? 2.5} dB</span>
+                  <span className="text-emerald-300 font-semibold">UL {lbResult.ulFadingMarginDb} dB</span>
                 </div>
               </div>
 
@@ -4702,7 +4710,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                       <span>DL Fading Margin (gNB → UE)</span>
                     </label>
                     <span className="text-xs font-mono font-bold text-cyan-300">
-                      {(inputs.dlFadingMarginDb ?? 2.0).toFixed(1)} dB
+                      {(lbResult.dlFadingMarginDb).toFixed(1)} dB
                     </span>
                   </div>
                   <input
@@ -4710,7 +4718,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                     min="0"
                     max="6"
                     step="0.5"
-                    value={inputs.dlFadingMarginDb ?? 2.0}
+                    value={lbResult.dlFadingMarginDb}
                     onChange={(e) => update({ dlFadingMarginDb: Number(e.target.value) })}
                     className="w-full accent-cyan-400 cursor-pointer"
                   />
@@ -4726,7 +4734,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                         type="button"
                         onClick={() => update({ dlFadingMarginDb: preset.val })}
                         className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors ${
-                          Math.abs((inputs.dlFadingMarginDb ?? 2.0) - preset.val) < 0.05
+                          Math.abs((lbResult.dlFadingMarginDb) - preset.val) < 0.05
                             ? 'bg-cyan-950 text-cyan-300 border border-cyan-800'
                             : 'bg-slate-950 text-slate-400 border border-slate-800 hover:text-slate-200'
                         }`}
@@ -4744,7 +4752,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                       <span>UL Fading Margin (UE → gNB)</span>
                     </label>
                     <span className="text-xs font-mono font-bold text-emerald-300">
-                      {(inputs.ulFadingMarginDb ?? 2.5).toFixed(1)} dB
+                      {(lbResult.ulFadingMarginDb).toFixed(1)} dB
                     </span>
                   </div>
                   <input
@@ -4752,7 +4760,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                     min="0"
                     max="6"
                     step="0.5"
-                    value={inputs.ulFadingMarginDb ?? 2.5}
+                    value={lbResult.ulFadingMarginDb}
                     onChange={(e) => update({ ulFadingMarginDb: Number(e.target.value) })}
                     className="w-full accent-emerald-400 cursor-pointer"
                   />
@@ -4768,7 +4776,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                         type="button"
                         onClick={() => update({ ulFadingMarginDb: preset.val })}
                         className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors ${
-                          Math.abs((inputs.ulFadingMarginDb ?? 2.5) - preset.val) < 0.05
+                          Math.abs((lbResult.ulFadingMarginDb) - preset.val) < 0.05
                             ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
                             : 'bg-slate-950 text-slate-400 border border-slate-800 hover:text-slate-200'
                         }`}
