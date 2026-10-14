@@ -138,6 +138,14 @@ export const FourPointsAnalysisTable: React.FC<FourPointsAnalysisTableProps> = (
                         }`}
                       />
                       <span className="font-semibold text-slate-100">{pt.pointName}</span>
+                      {isNear && pt.isDlCappedByHandset && (
+                        <span
+                          className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-amber-950/60 border border-amber-800/70 text-amber-300 cursor-help"
+                          title={result.mimoSummary?.handsetCappingReason || 'Downlink SU-MIMO is capped by the handset Rx antenna count.'}
+                        >
+                          Handset 2Rx Capped
+                        </span>
+                      )}
                     </div>
                     <div className="text-[11px] text-slate-400 mt-0.5 max-w-[200px] line-clamp-1 font-sans">
                       {pt.description}
@@ -228,9 +236,16 @@ export const FourPointsAnalysisTable: React.FC<FourPointsAnalysisTableProps> = (
                     <div className="text-cyan-300 font-bold text-sm">
                       {pt.dlThroughputMbps.toFixed(1)} <span className="text-[10px] text-slate-400 font-normal">Mbps</span>
                     </div>
-                    <div className="text-[10px] text-slate-400 font-sans">
-                      Forward Link
-                    </div>
+                    {isNear && pt.sectorDlThroughputMbps && pt.sectorDlThroughputMbps > pt.dlThroughputMbps ? (
+                      <div className="text-[10px] text-purple-300 font-sans flex items-center gap-1" title="Multi-User MIMO total sector throughput enabled by Base Station spatial multiplexing">
+                        <span>Sector:</span>
+                        <strong className="text-purple-200">{pt.sectorDlThroughputMbps.toFixed(1)}M</strong>
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-slate-400 font-sans">
+                        Forward Link
+                      </div>
+                    )}
                   </td>
 
                   {/* UL Throughput */}
@@ -297,7 +312,7 @@ export const FourPointsAnalysisTable: React.FC<FourPointsAnalysisTableProps> = (
             <strong>Physical Hierarchy:</strong> Near Cell (15% R) &gt; Medium Range (50% R) &gt; Bad Radio Conditions (78% R, interference/fading dip) &gt; Cell Edge (100% R, sensitivity limit).
           </span>
           <span className="font-mono text-cyan-400/90">
-            Ver 1.33.8
+            Ver 1.33.9
           </span>
         </div>
       </div>

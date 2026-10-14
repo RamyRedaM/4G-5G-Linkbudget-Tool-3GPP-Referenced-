@@ -49,7 +49,9 @@ import {
   ShieldAlert,
   Sparkles,
   CheckCircle2,
-  Compass
+  Compass,
+  AlertTriangle,
+  Zap
 } from 'lucide-react';
 import { calculateControlOverheads, calculateLinkBudget, calculate5GOverhead } from '../utils/linkBudgetCalculator';
 import {
@@ -3092,6 +3094,54 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                 <option value="32TR">32TR (32T32R Massive MIMO AAU)</option>
                 <option value="64TR">64TR (64T64R High-Density 3D Beamforming)</option>
               </select>
+
+              {/* Handset vs Base Station MIMO Mismatch & MU-MIMO Indicator (Correction 4) */}
+              {(() => {
+                const currentUeMimo: UeMimoMode = inputs.ueMimoMode || (inputs.technology === '4G' ? '1T2R' : '2T4R');
+                const ueRx = currentUeMimo.endsWith('8R') ? 8 : (currentUeMimo.endsWith('4R') ? 4 : (currentUeMimo.endsWith('1R') ? 1 : 2));
+                const bsCfg = MIMO_CONFIGS[inputs.mimoMode] || MIMO_CONFIGS['2x2'];
+                const bsDl = bsCfg.dlLayers;
+                const isCapped = bsDl > ueRx;
+
+                if (isCapped) {
+                  return (
+                    <div className="mt-2 p-2.5 rounded-md bg-amber-950/40 border border-amber-800/80 text-amber-200 text-[11px] font-mono space-y-1.5 shadow-sm">
+                      <div className="flex items-start gap-1.5">
+                        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                        <div>
+                          <div className="font-semibold text-amber-300">
+                            {inputs.technology === '4G' ? 'eNB' : 'gNB'} {inputs.mimoMode} ({bsDl} BS layers)
+                          </div>
+                          <div className="text-[10px] text-amber-300/80 leading-relaxed mt-0.5">
+                            Downlink SU-MIMO is capped at <strong>{ueRx} layers</strong> by UE Handset ({currentUeMimo}).
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-1.5 pt-1.5 border-t border-amber-800/40">
+                        <span className="text-[9px] text-slate-400 font-sans">
+                          Upgrade to 4Rx (LTE-A Cat 16+ / 5G):
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => update({ ueMimoMode: '2T4R' })}
+                          className="px-2 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/60 rounded text-[10px] font-mono font-medium transition-colors flex items-center gap-1 cursor-pointer"
+                        >
+                          <Zap className="w-3 h-3 text-amber-400" />
+                          Set UE to 4Rx (2T4R)
+                        </button>
+                      </div>
+                    </div>
+                  );
+                } else if (bsDl >= 4) {
+                  return (
+                    <div className="mt-2 p-2 rounded-md bg-emerald-950/40 border border-emerald-800/70 text-emerald-300 text-[10px] font-mono flex items-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span>Full {bsDl}-Layer SU-MIMO Active with {currentUeMimo} handset!</span>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
             </div>
 
             {/* Base Station Antenna Height */}

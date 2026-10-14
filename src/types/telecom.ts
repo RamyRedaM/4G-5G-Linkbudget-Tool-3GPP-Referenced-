@@ -332,8 +332,25 @@ export interface FourPointOutput {
   dlMcs: string;
   ulMcs: string;
   mimoLayers: number;
+  sectorDlThroughputMbps?: number;
+  isDlCappedByHandset?: boolean;
   ueCatCapped?: boolean;
   ueCatLimitMbps?: { dl: number; ul: number; catName: string };
+}
+
+export interface MimoSummary {
+  bsMimoMode: MimoMode;
+  bsDlLayers: number;
+  bsUlLayers: number;
+  ueMimoMode: UeMimoMode;
+  ueTxAntennas: number;
+  ueRxAntennas: number;
+  effectiveDlLayers: number;
+  effectiveUlLayers: number;
+  isDlCappedByHandset: boolean;
+  handsetCappingReason?: string;
+  muMimoMultiplier: number;
+  sectorDlThroughputNearMbps: number;
 }
 
 export interface LinkBudgetCalculationResult {
@@ -458,4 +475,5 @@ export interface LinkBudgetCalculationResult {
   shadowFadingSigmaSource?: string; // where σ came from (TR 38.901 table or user input)
   maxCellRangeCapped?: boolean; // true when R_max is limited by the propagation model validity range
   configWarnings?: string[]; // configuration warnings (undefined bandwidth / SCS, model range cap)
+  mimoSummary?: MimoSummary; // Base station vs UE spatial architecture & MU-MIMO summary
 }

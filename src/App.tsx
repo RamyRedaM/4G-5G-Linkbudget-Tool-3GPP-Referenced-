@@ -213,7 +213,7 @@ export default function App() {
       <footer className="border-t border-slate-900 bg-slate-950 py-4 text-center text-xs text-slate-500 font-mono">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
           <span>
-            4G-5G LKB (3GPP Ref) Ver 1.33.8 by RamyREDA · Standard Propagation Model (SPM) Engine
+            4G-5G LKB (3GPP Ref) Ver 1.33.9 by RamyREDA · Standard Propagation Model (SPM) Engine
           </span>
           <span className="text-slate-600">
             TS 38.101 · TS 38.104 · TS 38.901 · TS 38.306 · TS 36.101

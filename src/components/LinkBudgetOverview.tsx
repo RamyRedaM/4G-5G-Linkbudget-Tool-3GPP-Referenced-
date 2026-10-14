@@ -136,7 +136,12 @@ export const LinkBudgetOverview: React.FC<LinkBudgetOverviewProps> = ({ result, 
           </div>
           <div className="mt-2 pt-2 border-t border-slate-800/80 text-[11px] text-slate-400 flex justify-between font-mono">
             <span>UE EIRP: {result.ueEirpDbm.toFixed(1)} dBm</span>
-            <span className="text-indigo-300">MIMO: {inputs.mimoMode}</span>
+            <span
+              className={result.mimoSummary?.isDlCappedByHandset ? 'text-amber-300 font-semibold cursor-help' : 'text-indigo-300'}
+              title={result.mimoSummary?.handsetCappingReason}
+            >
+              MIMO: {inputs.mimoMode}{result.mimoSummary?.isDlCappedByHandset ? ' (2Rx UE)' : ''}
+            </span>
           </div>
         </div>
 
@@ -144,8 +149,15 @@ export const LinkBudgetOverview: React.FC<LinkBudgetOverviewProps> = ({ result, 
         <div className="bg-slate-900/90 border border-slate-800/90 border-t-2 border-t-blue-400 rounded-lg p-4 relative overflow-hidden transition-all duration-300 shadow-md hover:border-slate-700 shadow-blue-950/20">
           <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
             <span className="font-mono uppercase tracking-wider text-slate-300">Peak Near Throughput</span>
-            <div className="flex items-center gap-1 text-[11px] text-emerald-400 font-mono font-semibold">
-              {inputs.caEnabled ? `${result.caSummary.carrierCount}CC AGG` : '1CC'}
+            <div className="flex items-center gap-1.5 text-[11px] font-mono font-semibold">
+              {result.mimoSummary?.isDlCappedByHandset && (
+                <span className="text-[9px] text-amber-300 bg-amber-950/70 border border-amber-800/80 px-1 py-0.2 rounded" title={result.mimoSummary.handsetCappingReason}>
+                  Handset 2Rx
+                </span>
+              )}
+              <span className="text-emerald-400">
+                {inputs.caEnabled ? `${result.caSummary.carrierCount}CC AGG` : '1CC'}
+              </span>
             </div>
           </div>
           <div className="flex items-baseline gap-3 mb-2">
