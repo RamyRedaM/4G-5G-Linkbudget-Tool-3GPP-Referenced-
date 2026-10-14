@@ -3,7 +3,7 @@ import { LinkBudgetCalculationResult, LinkBudgetInputs } from '../types/telecom'
 export function exportLinkBudgetCsv(result: LinkBudgetCalculationResult, inputs: LinkBudgetInputs) {
   const lines: string[] = [];
 
-  lines.push('=== 4G-5G LKB (3GPP Ref) Ver 1.33.7 by RamyREDA ===');
+  lines.push('=== 4G-5G LKB (3GPP Ref) Ver 1.33.8 by RamyREDA ===');
   lines.push(`Generated: ${new Date().toISOString()}`);
   lines.push(`Technology: ${inputs.technology}`);
   lines.push(`Band: ${inputs.band} (${inputs.duplexMode})`);

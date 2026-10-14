@@ -201,6 +201,8 @@ export interface LinkBudgetInputs {
   ulFadingMarginDb?: number; // Uplink multipath/fast fading margin (e.g. 1.0 to 6.0 dB, default 2.5 dB)
   interferenceMarginDb: number; // e.g. 2 to 4 dB
   iotMarginDb: number; // Interference over Thermal in UL (e.g. 3 dB)
+  interferenceMarginMode?: 'DYNAMIC_3GPP' | 'MANUAL'; // 'DYNAMIC_3GPP' (hex grid load coupling) or 'MANUAL' (direct dB entry)
+  applyAntennaTiltLossToMapl?: boolean; // When true, deducts antenna vertical pattern loss A_V(θ_edge) from cell-edge MAPL (TR 38.901 Table 7.3-1)
   foliageLossDb: number;
   additionalPenetrationLossDb: number;
 
@@ -330,6 +332,8 @@ export interface FourPointOutput {
   dlMcs: string;
   ulMcs: string;
   mimoLayers: number;
+  ueCatCapped?: boolean;
+  ueCatLimitMbps?: { dl: number; ul: number; catName: string };
 }
 
 export interface LinkBudgetCalculationResult {
@@ -340,6 +344,8 @@ export interface LinkBudgetCalculationResult {
   bottleneckDeltaDb: number;
   maxCellRangeKm: number;
   maxCellRangeMeters: number;
+  cellEdgePatternLossAppliedDb?: number;
+  ueCategoryLimitSummary?: { category: UeCategory; maxDlMbps: number; maxUlMbps: number; isCapped: boolean };
   
   // Base Station Derived RF
   rsPowerDbm: number;
@@ -445,6 +451,7 @@ export interface LinkBudgetCalculationResult {
   coverageProbabilityType?: 'AREA' | 'EDGE';
   coverageEdgeProbabilityPercent?: number; // cell-edge probability the shadow fading margin is based on
   coverageAreaProbabilityPercent?: number; // equivalent area coverage (Jakes)
+  effectiveGaussianZ?: number; // Gaussian z-score corresponding to the cell-edge coverage probability
   pathLossExponentAtEdge?: number;
   dlSinrModel?: import('../utils/linkBudgetCalculator').DlSinrModel; // DL SINR vs path loss / distance (shared with charts)
   effectiveShadowFadingStdDevDb?: number; // σ actually used for the shadow fading margin

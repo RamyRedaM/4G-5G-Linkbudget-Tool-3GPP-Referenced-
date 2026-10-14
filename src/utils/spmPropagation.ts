@@ -346,7 +346,8 @@ export function calculatePathLoss(
           - 9.0 * Math.log10(dBpMeters * dBpMeters + Math.pow(hb - hm, 2));
       const plNlos = 13.54 + 39.08 * Math.log10(d3dMeters) + 20.0 * Math.log10(fGhz) - 0.6 * (hm - 1.5);
       
-      const plNlosEff = Math.max(plLos, plNlos) + (params.clutter === 'DENSE_URBAN' ? 3.0 : params.clutter === 'SUBURBAN' ? -4.0 : 0);
+      // 3GPP TR 38.901 Table 7.4.1-1: UMa is inherently calibrated for high-density urban macro deployment
+      const plNlosEff = Math.max(plLos, plNlos) + (params.clutter === 'SUBURBAN' ? -4.0 : 0);
       rawPl = params.scenario === 'OUTDOOR_LOS'
         ? blendLosNlos(plLos, plNlosEff, getLosProbability('3GPP_UMA', d2dMeters, hm))
         : plNlosEff;

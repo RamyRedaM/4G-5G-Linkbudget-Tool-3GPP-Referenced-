@@ -31,7 +31,7 @@ export const Header: React.FC<HeaderProps> = ({
               style={{ fontSize: '14px', lineHeight: '27px' }}
               className="font-semibold tracking-tight text-white font-mono whitespace-nowrap"
             >
-              4G-5G LKB (3GPP Ref) Ver 1.33.7 <span className="text-cyan-400 font-normal">by RamyREDA</span>
+              4G-5G LKB (3GPP Ref) Ver 1.33.8 <span className="text-cyan-400 font-normal">by RamyREDA</span>
             </span>
           </div>
 

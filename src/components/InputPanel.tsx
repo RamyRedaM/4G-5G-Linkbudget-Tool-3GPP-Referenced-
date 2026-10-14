@@ -4161,58 +4161,139 @@ export const InputPanel: React.FC<InputPanelProps> = ({ inputs, onChange }) => {
                     </div>
                   </div>
 
-                  {/* 3. Target Edge Coverage Probability (P_cov) */}
-                  <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3 flex flex-col justify-between">
+                  {/* 3. Target Coverage Probability (P_cov): Segregated Cell Area vs Cell Edge Probability */}
+                  <div className="bg-slate-900/90 border border-slate-800 rounded-lg p-3.5 flex flex-col justify-between shadow-md hover:border-slate-700 transition-colors">
                     <div>
-                      <div className="flex justify-between items-center mb-1">
-                        <label className="text-xs font-mono uppercase tracking-wider text-slate-300 font-semibold">
-                          Coverage Probability (P_cov)
+                      {/* Title & Active Target Mode Switcher */}
+                      <div className="flex justify-between items-center mb-1.5">
+                        <label className="text-xs font-mono uppercase tracking-wider text-slate-200 font-bold flex items-center gap-1.5">
+                          <Target className="w-3.5 h-3.5 text-cyan-400" />
+                          <span>Coverage Probability (P_cov)</span>
                         </label>
-                        <span className="text-xs font-mono font-bold text-cyan-400">
-                          {inputs.coverageProbability}% {coverageIsArea ? 'area' : 'edge'}
+                        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded border border-cyan-800/80 bg-cyan-950/80 text-cyan-300">
+                          {coverageIsArea ? `${inputs.coverageProbability}% Area Target` : `${inputs.coverageProbability}% Edge Target`}
                         </span>
                       </div>
-                      <div className="flex rounded-md border border-slate-700 overflow-hidden text-[10px] font-mono mb-1.5 w-fit">
-                        {([['AREA', 'Cell area'], ['EDGE', 'Cell edge']] as const).map(([k, label]) => (
-                          <button
-                            key={k}
-                            type="button"
-                            onClick={() => update({ coverageProbabilityType: k })}
-                            className={`px-2 py-0.5 cursor-pointer ${(inputs.coverageProbabilityType ?? 'AREA') === k ? 'bg-cyan-500 text-slate-950 font-bold' : 'bg-slate-950 text-slate-300'}`}
-                          >
-                            {label}
-                          </button>
-                        ))}
+
+                      {/* Segregated Mode Tabs */}
+                      <div className="flex rounded-md border border-slate-700 overflow-hidden text-[10px] font-mono mb-2 w-full">
+                        <button
+                          type="button"
+                          onClick={() => update({ coverageProbabilityType: 'AREA' })}
+                          className={`flex-1 py-1 text-center font-bold transition-colors cursor-pointer ${
+                            coverageIsArea
+                              ? 'bg-cyan-500 text-slate-950 font-bold shadow-xs'
+                              : 'bg-slate-950 text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          Cell Area Driven ({coverageIsArea ? inputs.coverageProbability : (lbResult.coverageAreaProbabilityPercent ?? 95)}%)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => update({ coverageProbabilityType: 'EDGE' })}
+                          className={`flex-1 py-1 text-center font-bold transition-colors cursor-pointer ${
+                            !coverageIsArea
+                              ? 'bg-emerald-500 text-slate-950 font-bold shadow-xs'
+                              : 'bg-slate-950 text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          Cell Edge Driven ({!coverageIsArea ? inputs.coverageProbability : edgeProbEff}%)
+                        </button>
                       </div>
-                      <p className="text-[10px] text-slate-500 font-mono mb-2">
-                        {coverageIsArea
-                          ? `${inputs.coverageProbability}% area = ${edgeProbEff}% edge (Jakes, n = ${lbResult.pathLossExponentAtEdge}) · z = ${currentZ.toFixed(2)}`
-                          : `${inputs.coverageProbability}% edge = ${lbResult.coverageAreaProbabilityPercent}% area (Jakes) · z = ${currentZ.toFixed(2)}`}
-                      </p>
+
+                      {/* Segregated Side-by-Side Area & Edge Probability Display Cards */}
+                      <div className="grid grid-cols-2 gap-2 mb-2.5">
+                        {/* Area Probability Card */}
+                        <div className={`p-2 rounded border transition-all ${
+                          coverageIsArea
+                            ? 'bg-cyan-950/40 border-cyan-600/70 ring-1 ring-cyan-500/30'
+                            : 'bg-slate-950/60 border-slate-800 opacity-80'
+                        }`}>
+                          <div className="flex items-center justify-between text-[10px] font-mono mb-0.5">
+                            <span className="text-slate-400">Cell Area P_cov</span>
+                            {coverageIsArea && <span className="text-cyan-400 font-bold text-[9px]">● Input</span>}
+                          </div>
+                          <div className="text-base font-mono font-bold text-cyan-300">
+                            {coverageIsArea ? inputs.coverageProbability : (lbResult.coverageAreaProbabilityPercent ?? 95)}%
+                          </div>
+                          <div className="text-[9px] text-slate-400 font-mono mt-0.5">
+                            z_area = {getGaussianZ(coverageIsArea ? inputs.coverageProbability : (lbResult.coverageAreaProbabilityPercent ?? 95)).toFixed(2)}
+                          </div>
+                        </div>
+
+                        {/* Edge Probability Card */}
+                        <div className={`p-2 rounded border transition-all ${
+                          !coverageIsArea
+                            ? 'bg-emerald-950/40 border-emerald-600/70 ring-1 ring-emerald-500/30'
+                            : 'bg-slate-950/60 border-slate-800 opacity-80'
+                        }`}>
+                          <div className="flex items-center justify-between text-[10px] font-mono mb-0.5">
+                            <span className="text-slate-400">Cell Edge P_cov</span>
+                            {!coverageIsArea && <span className="text-emerald-400 font-bold text-[9px]">● Input</span>}
+                          </div>
+                          <div className="text-base font-mono font-bold text-emerald-300">
+                            {!coverageIsArea ? inputs.coverageProbability : edgeProbEff}%
+                          </div>
+                          <div className="text-[9px] text-emerald-400 font-mono font-semibold mt-0.5">
+                            z_edge = {getGaussianZ(!coverageIsArea ? inputs.coverageProbability : edgeProbEff).toFixed(2)} (M_SF applied)
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Jakes Equivalence Explainer */}
+                      <div className="p-2 rounded bg-slate-950/80 border border-slate-800 text-[10px] font-mono text-slate-400 mb-2.5">
+                        <div className="flex items-center justify-between text-cyan-300 font-bold mb-0.5">
+                          <span>Jakes Transformation (n={lbResult.pathLossExponentAtEdge ?? 3.5}, σ={sigmaEff.toFixed(1)} dB):</span>
+                          <span className="text-emerald-300">
+                            {coverageIsArea
+                              ? `${inputs.coverageProbability}% Area ⟷ ${edgeProbEff}% Edge`
+                              : `${lbResult.coverageAreaProbabilityPercent ?? 95}% Area ⟷ ${inputs.coverageProbability}% Edge`}
+                          </span>
+                        </div>
+                        <div className="text-slate-400 text-[9px] leading-tight">
+                          {coverageIsArea
+                            ? `At 95% cell area coverage, 86% of the cell perimeter R_max receives signal above threshold. Fading margin M_SF = z_edge · σ = ${(getGaussianZ(edgeProbEff) * sigmaEff).toFixed(1)} dB.`
+                            : `At ${inputs.coverageProbability}% cell edge coverage, equivalent cell area coverage is ${lbResult.coverageAreaProbabilityPercent ?? 95}%. Fading margin M_SF = z_edge · σ = ${(getGaussianZ(inputs.coverageProbability) * sigmaEff).toFixed(1)} dB.`}
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="space-y-1.5">
+                    {/* Active Slider & Presets Controls */}
+                    <div className="space-y-1.5 pt-1 border-t border-slate-800/80">
+                      <div className="flex justify-between items-center text-[10px] font-mono">
+                        <span className="text-slate-400">Adjust {coverageIsArea ? 'Cell Area' : 'Cell Edge'} Probability:</span>
+                        <span className="text-cyan-300 font-bold font-mono">
+                          {inputs.coverageProbability}%
+                        </span>
+                      </div>
                       <input
                         type="range"
-                        min="80"
+                        min={coverageIsArea ? '80' : '65'}
                         max="98"
                         step="1"
                         value={inputs.coverageProbability}
                         onChange={(e) => {
                           const prob = Number(e.target.value);
-                          const newMargin = calculateShadowFadingMargin(sigmaEff, prob);
                           update({
-                            coverageProbability: prob,
-                            shadowFadingMarginDb: newMargin
+                            coverageProbability: prob
                           });
                         }}
                         className="w-full accent-cyan-400 cursor-pointer"
                       />
                       <div className="flex justify-between text-[10px] text-slate-500 font-mono">
-                        <span>80% (0.84)</span>
-                        <span>90% (1.28)</span>
-                        <span>95% (1.64)</span>
-                        <span>98% (2.05)</span>
+                        {coverageIsArea ? (
+                          <>
+                            <button type="button" onClick={() => update({ coverageProbability: 90, coverageProbabilityType: 'AREA' })} className="hover:text-cyan-300 cursor-pointer">90% Area</button>
+                            <button type="button" onClick={() => update({ coverageProbability: 95, coverageProbabilityType: 'AREA' })} className="text-cyan-400 font-bold hover:text-cyan-300 cursor-pointer">95% (Std = 86% Edge)</button>
+                            <button type="button" onClick={() => update({ coverageProbability: 98, coverageProbabilityType: 'AREA' })} className="hover:text-cyan-300 cursor-pointer">98% Area</button>
+                          </>
+                        ) : (
+                          <>
+                            <button type="button" onClick={() => update({ coverageProbability: 75, coverageProbabilityType: 'EDGE' })} className="hover:text-emerald-300 cursor-pointer">75% Edge</button>
+                            <button type="button" onClick={() => update({ coverageProbability: 86, coverageProbabilityType: 'EDGE' })} className="text-emerald-400 font-bold hover:text-emerald-300 cursor-pointer">86% (= 95% Area)</button>
+                            <button type="button" onClick={() => update({ coverageProbability: 90, coverageProbabilityType: 'EDGE' })} className="hover:text-emerald-300 cursor-pointer">90% Edge</button>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>

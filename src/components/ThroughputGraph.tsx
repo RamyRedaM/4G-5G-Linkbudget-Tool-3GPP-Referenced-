@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { FourPointOutput, LinkBudgetCalculationResult } from '../types/telecom';
 import { ArrowDownRight, ArrowUpRight, BarChart3, LineChart, Layers, Info } from 'lucide-react';
+import { buildThroughputCurve } from '../utils/interpolation';
 
 interface ThroughputGraphProps {
   fourPoints: FourPointOutput[];
@@ -26,44 +27,11 @@ export const ThroughputGraph: React.FC<ThroughputGraphProps> = ({
   const maxUlThr = Math.max(5, fourPoints[0].ulThroughputMbps);
   const maxScaleThr = Math.ceil((maxDlThr * 1.15) / 50) * 50 || 100;
 
-  // Generate continuous curve data across the cell distance
+  // Generate continuous curve data across the cell distance using monotone cubic Hermite interpolation (PCHIP)
+  // strictly anchoring the 4 calculated link budget coverage points with smooth parabolic roll-off
   const curvePoints = useMemo(() => {
-    const pts = [];
-    const steps = 60;
     const maxDistKm = Math.max(0.5, result.maxCellRangeKm * 1.15);
-
-    const peakDl = fourPoints[0].dlThroughputMbps;
-    const peakUl = fourPoints[0].ulThroughputMbps;
-    const edgeDl = fourPoints[3].dlThroughputMbps;
-    const edgeUl = fourPoints[3].ulThroughputMbps;
-
-    for (let i = 0; i <= steps; i++) {
-      const dist = (i / steps) * maxDistKm;
-      const normDist = dist / result.maxCellRangeKm;
-
-      let dlThr: number;
-      let ulThr: number;
-
-      if (normDist <= 1.0) {
-        // High SNR decay inside cell
-        dlThr = peakDl * Math.pow(Math.max(0.02, 1 - normDist * 0.92), 1.55);
-        ulThr = peakUl * Math.pow(Math.max(0.02, 1 - normDist * 0.90), 1.45);
-        dlThr = Math.max(edgeDl, dlThr);
-        ulThr = Math.max(edgeUl, ulThr);
-      } else {
-        // Outside cell edge (rapid drop)
-        const beyondFactor = Math.max(0, 1 - (normDist - 1.0) * 3);
-        dlThr = edgeDl * beyondFactor;
-        ulThr = edgeUl * beyondFactor;
-      }
-
-      pts.push({
-        distKm: Number(dist.toFixed(3)),
-        dlThr: Number(dlThr.toFixed(1)),
-        ulThr: Number(ulThr.toFixed(1))
-      });
-    }
-    return pts;
+    return buildThroughputCurve(fourPoints, result.maxCellRangeKm, 60, maxDistKm);
   }, [fourPoints, result]);
 
   const maxDistKm = curvePoints[curvePoints.length - 1]?.distKm || 1;

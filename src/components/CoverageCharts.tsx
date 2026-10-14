@@ -3,6 +3,7 @@ import { LinkBudgetCalculationResult, LinkBudgetInputs } from '../types/telecom'
 import { calculatePathLoss } from '../utils/spmPropagation';
 import { TELECOM_BANDS } from '../data/telecomBands';
 import { dlSinrFromModel } from '../utils/linkBudgetCalculator';
+import { buildThroughputCurve } from '../utils/interpolation';
 import { Activity, Crosshair } from 'lucide-react';
 
 interface CoverageChartsProps {
@@ -35,31 +36,21 @@ export const CoverageCharts: React.FC<CoverageChartsProps> = ({ result, inputs }
       spmK2Override: inputs.spmK2
     };
 
+    const thrPoints = buildThroughputCurve(result.fourPoints, result.maxCellRangeKm, steps, maxDist);
+
     for (let i = 1; i <= steps; i++) {
       const distKm = (i / steps) * maxDist;
       const pl = calculatePathLoss(distKm, propParams);
       const rsrp = result.rsEirpDbm - pl;
       
-      // DL SINR from the link budget (same model as the 4-point table: margins at the coverage target,
-      // neighbour interference growing towards the edge, EVM ceiling)
+      // Physical radio SS-SINR from the link budget (decaying continuously with path loss and geometry)
       const normDist = distKm / result.maxCellRangeKm;
-      const sinr = result.dlSinrModel ? dlSinrFromModel(result.dlSinrModel, pl, distKm) : 25 - normDist * 29;
+      const sinr = result.dlSinrModel ? dlSinrFromModel(result.dlSinrModel, pl, distKm, false) : 25 - normDist * 29;
 
-      // Throughputs
-      const peakDl = result.fourPoints[0].dlThroughputMbps;
-      const peakUl = result.fourPoints[0].ulThroughputMbps;
-      const edgeDl = result.fourPoints[3].dlThroughputMbps;
-      const edgeUl = result.fourPoints[3].ulThroughputMbps;
-
-      let dlThr = peakDl * Math.pow(Math.max(0.02, 1 - normDist * 0.92), 1.6);
-      let ulThr = peakUl * Math.pow(Math.max(0.02, 1 - normDist * 0.90), 1.5);
-      if (normDist > 1.0) {
-        dlThr = Math.max(0, edgeDl * 0.4);
-        ulThr = Math.max(0, edgeUl * 0.3);
-      } else {
-        dlThr = Math.max(edgeDl, dlThr);
-        ulThr = Math.max(edgeUl, ulThr);
-      }
+      // Consistent PCHIP throughput passing strictly through 4-points
+      const thrPt = thrPoints[i] || thrPoints[thrPoints.length - 1];
+      const dlThr = thrPt ? thrPt.dlThr : 0;
+      const ulThr = thrPt ? thrPt.ulThr : 0;
 
       points.push({
         distKm: Number(distKm.toFixed(3)),
@@ -301,33 +292,67 @@ export const CoverageCharts: React.FC<CoverageChartsProps> = ({ result, inputs }
 
             const pathD = curveData.map((pt, i) => `${i === 0 ? 'M' : 'L'} ${getX(pt.distKm)} ${getY(pt.rsrp)}`).join(' ');
 
-            // DL SINR on a right-hand axis (-10 ... 30 dB), from the link budget at the coverage target
-            const minSinr = -10;
-            const maxSinr = 30;
+            // DL SINR on a right-hand axis (-5 ... 35 dB), decaying continuously with RF geometry
+            const minSinr = -5;
+            const maxSinr = Math.max(30, Math.ceil((Math.max(...curveData.map(pt => pt.sinr), 25) + 3) / 5) * 5);
             const getYs = (val: number) => margin.top + chartH - ((Math.max(minSinr, Math.min(maxSinr, val)) - minSinr) / (maxSinr - minSinr)) * chartH;
             const sinrPathD = curveData.map((pt, i) => `${i === 0 ? 'M' : 'L'} ${getX(pt.distKm)} ${getYs(pt.sinr)}`).join(' ');
 
             return (
               <g>
+                {/* Axis Titles */}
+                <text x={margin.left} y={margin.top - 8} textAnchor="start" className="fill-emerald-400 text-[10px] font-mono font-semibold">
+                  SS-RSRP (dBm)
+                </text>
+                <text x={margin.left + chartW + 30} y={margin.top - 8} textAnchor="end" className="fill-cyan-400 text-[10px] font-mono font-semibold">
+                  SS-SINR (dB)
+                </text>
+
                 {/* SINR axis (right) */}
-                {[-10, 0, 10, 20, 30].map((val) => (
+                {[-5, 0, 10, 20, 30].filter(v => v <= maxSinr).map((val) => (
                   <text
                     key={`s${val}`}
-                    x={margin.left + chartW + 4}
+                    x={margin.left + chartW + 6}
                     y={getYs(val) + 3}
                     textAnchor="start"
-                    className="fill-cyan-500 text-[9px] font-mono"
+                    className="fill-cyan-400 text-[9px] font-mono font-medium"
                   >
                     {val}
                   </text>
                 ))}
-                <path d={sinrPathD} fill="none" stroke="#22D3EE" strokeWidth="1.5" strokeDasharray="5 3" />
+
+                {/* 256QAM EVM Demodulation Ceiling Line */}
+                {result.dlSinrModel?.ceilingDb && result.dlSinrModel.ceilingDb <= maxSinr && (
+                  <g>
+                    <line
+                      x1={margin.left}
+                      y1={getYs(result.dlSinrModel.ceilingDb)}
+                      x2={margin.left + chartW}
+                      y2={getYs(result.dlSinrModel.ceilingDb)}
+                      stroke="#38BDF8"
+                      strokeWidth="1"
+                      strokeDasharray="4 4"
+                      opacity="0.7"
+                    />
+                    <text
+                      x={margin.left + chartW - 6}
+                      y={getYs(result.dlSinrModel.ceilingDb) - 4}
+                      textAnchor="end"
+                      className="fill-sky-400 text-[8px] font-mono opacity-80"
+                    >
+                      256QAM EVM Demod Limit ({result.dlSinrModel.ceilingDb.toFixed(1)} dB)
+                    </text>
+                  </g>
+                )}
+
+                {/* Continuously decaying SS-SINR curve */}
+                <path d={sinrPathD} fill="none" stroke="#22D3EE" strokeWidth="2.5" />
                 {result.fourPoints.map((pt) => (
                   <circle
                     key={`sinr-${pt.pointName}`}
                     cx={getX(pt.rangeKm)}
                     cy={getYs(pt.ssSinrDb)}
-                    r="3"
+                    r="3.5"
                     className="fill-cyan-300"
                     stroke="#0B0F19"
                     strokeWidth="1.5"
@@ -489,8 +514,8 @@ export const CoverageCharts: React.FC<CoverageChartsProps> = ({ result, inputs }
                   <span>Coverage Threshold (-118 dBm)</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="w-3 border-t-2 border-dashed border-cyan-400 inline-block" />
-                  <span>DL SINR (dB, right axis)</span>
+                  <span className="w-3 h-0.5 bg-cyan-400 inline-block" />
+                  <span>SS-SINR (dB, right axis)</span>
                 </div>
               </>
             )}

@@ -30,7 +30,8 @@ import {
   getPropagationModelFrequencyRange,
   getRangeSearchCeilingKm,
   edgeProbabilityForAreaCoverage,
-  jakesAreaCoverage
+  jakesAreaCoverage,
+  getGaussianZ
 } from './spmPropagation';
 import { calculateInterferenceSummary } from './interferenceCalculator';
 
@@ -814,15 +815,32 @@ export interface DlSinrModel {
  * interference I/S(d) = x_edge·(d/R)^3.5 growing towards the cell edge, capped at the EVM limit.
  * Used by the 4-point table and the coverage charts.
  */
-export function dlSinrFromModel(model: DlSinrModel, pathLossDb: number, distKm: number): number {
+export function dlSinrFromModel(
+  model: DlSinrModel,
+  pathLossDb: number,
+  distKm: number,
+  applyCeiling: boolean = true
+): number {
   const snr = model.linkConstantDb - pathLossDb;
-  const sinr = model.edgeInterferenceToSignalRatio === null
-    ? snr - model.fixedInterferenceMarginDb
-    : -10 * Math.log10(
-        Math.pow(10, -(snr - model.pessimisticOffsetDb) / 10)
-        + model.edgeInterferenceToSignalRatio * Math.pow(Math.min(1.5, distKm / Math.max(0.001, model.cellRangeKm)), 3.5)
-      );
-  return Math.min(model.ceilingDb, sinr);
+  if (model.edgeInterferenceToSignalRatio === null) {
+    const sinr = snr - model.fixedInterferenceMarginDb;
+    return applyCeiling ? Math.min(model.ceilingDb, sinr) : sinr;
+  }
+
+  // Multi-cell cellular geometry (3GPP TR 36.942 / TR 38.901 / ITU-R M.2412):
+  // Neighbor base stations at inter-site distance (~ISD = 1.5 * R_max) create background inter-cell interference.
+  // Peak multi-cell geometry near boresight (d -> 0) is ~26-30 dB (I/S ~ 0.001 - 0.0025).
+  // As UE moves toward cell edge, serving signal S drops with path loss while interference I rises,
+  // causing I/S to grow quadratically matching 2D circular area (d/R)^2.
+  const normDist = Math.min(1.5, Math.max(0.01, distKm / Math.max(0.001, model.cellRangeKm)));
+  const edgeIs = model.edgeInterferenceToSignalRatio;
+  const centerIs = Math.min(edgeIs * 0.05, 0.002);
+  const isRatio = centerIs + (edgeIs - centerIs) * Math.pow(normDist, 2.0);
+
+  const totalNoisePlusInterference = Math.pow(10, -(snr - model.pessimisticOffsetDb) / 10) + isRatio;
+  const sinr = -10 * Math.log10(Math.max(1e-7, totalNoisePlusInterference));
+
+  return applyCeiling ? Math.min(model.ceilingDb, sinr) : sinr;
 }
 
 /**
@@ -920,12 +938,20 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
   const numBeams = inputs.numberOfBeams ?? 1;
   const multiBeamGainDb = numBeams > 1 ? Number((10 * Math.log10(numBeams) * 0.45).toFixed(1)) : 0.0;
   // An AAU datasheet antenna gain is the beam gain of the whole array: it already contains the beamforming (array) gain.
-  // Then no beamforming gain is added on top in DL, and UL only adds dual-polarisation combining (2 branches, +3 dB).
-  // With an element / passive-panel gain the MIMO table's precoding and receive-combining gains are added.
+  // In DL, array beamforming gain is already within the datasheet antenna gain (dlBfGainDb = 0).
+  // In UL, digital MRC/IRC combining across multi-transceiver arrays provides receive diversity & combining gain:
+  // 64TR: +8.5 dB (64-branch digital combining), 32TR: +7.5 dB, 16TR: +6.5 dB, 8x8: +6.0 dB, 4x4: +4.5 dB, 2x2: +3.0 dB.
+  // With an element / passive-panel gain, the full MIMO table's beamforming and combining gains are added.
   const antennaGainIncludesArrayGain = inputs.bsAntennaGainIncludesArrayGain ?? (mimoInfo.isAau === true);
   const dlBfGainDb = antennaGainIncludesArrayGain ? 0.0 : Number((mimoInfo.dlBfGainDb + multiBeamGainDb).toFixed(1));
+  const defaultAauCombiningGainDb = inputs.mimoMode === '64TR' ? 8.5 :
+    inputs.mimoMode === '32TR' ? 7.5 :
+    inputs.mimoMode === '16TR' ? 6.5 :
+    inputs.mimoMode === '8x8' ? 6.0 :
+    inputs.mimoMode === '4x4' ? 4.5 :
+    inputs.mimoMode === '2x2' ? 3.0 : 0.0;
   const ulRxGainDb = antennaGainIncludesArrayGain
-    ? 3.0
+    ? defaultAauCombiningGainDb
     : Number((mimoInfo.ulRxGainDb + (numBeams > 1 ? multiBeamGainDb * 0.7 : 0)).toFixed(1));
 
   // UE MIMO & Antenna Architecture (1T1R, 1T2R, 1T4R, 2T2R, 2T4R, 4T4R, 4T8R)
@@ -1141,7 +1167,7 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
     spmK1Override: inputs.spmK1,
     spmK2Override: inputs.spmK2,
     shadowFadingStdDevDb: effectiveShadowFadingStdDevDb,
-    coverageProbability: inputs.coverageProbability
+    coverageProbability: coverageLevels.edge
   });
   const tentativeCellRangeMeters = Math.max(100, Math.round(tentativeRangeKm * 1000));
 
@@ -1210,7 +1236,7 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
     spmK1Override: inputs.spmK1,
     spmK2Override: inputs.spmK2,
     shadowFadingStdDevDb: effectiveShadowFadingStdDevDb,
-    coverageProbability: inputs.coverageProbability
+    coverageProbability: coverageLevels.edge
   };
 
   const maxCellRangeKm = Number(calculateDistanceForPathLoss(systemMaplDb, propParams).toFixed(3));
@@ -1306,43 +1332,37 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
 
   // Link adaptation: SINR -> modulation order, code rate and rank
   const selectLinkAdaptation = (sinrDb: number, layers: number, isUplink: boolean) => {
-    // SINR to Shannon / 3GPP spectral efficiency mapping
-    // At low SINR (< -3 dB), MCS falls to QPSK rate 0.15
-    // At high SINR (> 20 dB), 256QAM (rate 0.925) or 64QAM (rate 0.85) is achieved
-    let qm = 2; // QPSK
-    let codeRate = 0.15;
-    let rank = 1;
+    // 3GPP TS 38.214 Table 5.1.3.1-1 & 5.1.3.1-2 Link Adaptation via Attenuated Shannon Bound (TR 36.942 Annex A)
+    // 5G NR (LDPC + advanced MMSE-IRC receiver): alpha = 0.75; 4G LTE (Turbo): alpha = 0.65
+    const alpha = is5G ? 0.75 : 0.65;
+    const snrLin = Math.max(0.01, Math.pow(10, sinrDb / 10));
+    const targetSe = alpha * Math.log2(1 + snrLin);
+    const table = (!isUplink && maxDlMod === '256QAM') ? MCS_TABLE_2 : MCS_TABLE_1;
 
-    if (sinrDb > 20) {
-      if (!isUplink && maxDlMod === '64QAM') {
-        qm = 6; // Capped to 64QAM
-        codeRate = 0.85;
-      } else {
-        qm = isUplink ? 6 : 8; // 256QAM DL or 64QAM UL
-        codeRate = isUplink ? 0.85 : 0.925;
+    let bestIdx = 0;
+    for (let i = 0; i < table.length; i++) {
+      const [q, r] = table[i];
+      if (isUplink && q > 6) continue; // Handset UL max 64QAM
+      if (!isUplink && maxDlMod === '64QAM' && q > 6) continue;
+      const se = q * (r / 1024);
+      if (se <= targetSe) {
+        bestIdx = i;
       }
+    }
+    const [qm, r] = table[bestIdx];
+    const codeRate = r / 1024;
+
+    // MIMO Rank adaptation based on channel SINR & geometry (TR 38.901 / TR 36.814)
+    // In massive MIMO beamforming, user beams maintain spatial separation across most of the cell area:
+    let rank = 1;
+    if (sinrDb >= 11) {
       rank = layers;
-    } else if (sinrDb > 14) {
-      qm = 6; // 64QAM
-      codeRate = 0.80;
-      rank = Math.min(layers, 4);
-    } else if (sinrDb > 7) {
-      qm = 4; // 16QAM
-      codeRate = 0.65;
-      rank = Math.min(layers, 2);
-    } else if (sinrDb > 1) {
-      qm = 2; // QPSK
-      codeRate = 0.45;
-      rank = 1;
+    } else if (sinrDb >= 5) {
+      rank = Math.min(layers, layers >= 4 ? 2 : 1);
     } else {
-      qm = 2; // QPSK low code rate
-      codeRate = 0.18;
       rank = 1;
     }
-
     if (isUplink) {
-      // Handset uplink max 64QAM, rank bounded by the SINR tier and effectiveUlLayers
-      qm = Math.min(qm, 6);
       rank = Math.min(rank, layers, effectiveUlLayers);
     }
 
@@ -1446,8 +1466,8 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
     cellRangeKm: maxCellRangeKm,
     ceilingDb: dlSinrCeilingDb
   };
-  const dlSinrAtPl = (pl: number, distKm: number) => Number(dlSinrFromModel(dlSinrModel, pl, distKm).toFixed(1));
-  const ulSinrAtPl = (pl: number) => Number(Math.min(ulSinrCeilingDb,
+  const dlSinrAtPl = (pl: number, distKm: number) => Number(dlSinrFromModel(dlSinrModel, pl, distKm, false).toFixed(1));
+  const ulSinrAtPl = (pl: number) => Number((
     ueEirpDbm + inputs.bsAntennaGainDbi - inputs.bsFeederCableLossDb - pl + ulRxGainDb
     - bsThermalNoiseFloorDbm - effectiveUlIotMarginDb - shadowFadingMarginDb - ulFadingMarginDb
   ).toFixed(1));
@@ -1512,6 +1532,37 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
 
   const isFixedRateEdgeService = ['VONR_5G', 'VOLTE_4G', 'NBIOT_4G'].includes(serviceResolved.serviceProfile);
 
+  const dlThrEdge = isFixedRateEdgeService
+    ? serviceResolved.targetDlThroughputMbps
+    : Math.max(serviceResolved.targetDlThroughputMbps, calculate3GPPThroughput(inputs.bandwidthMHz, sinrEdge, effectiveDlLayers, dlDutyCycle, false));
+  const ulThrEdge = isFixedRateEdgeService
+    ? serviceResolved.targetUlThroughputMbps
+    : Math.max(serviceResolved.targetUlThroughputMbps, calculate3GPPThroughput(inputs.bandwidthMHz, ulSinrEdge, effectiveUlLayers, ulDutyCycle, true));
+
+  // Parabolic decaying throughput distribution profile across the cell radius (3GPP / ITU standard):
+  // R(r) = R_edge + (R_peak - R_edge) * [1 - (r/R_edge)^2]
+  const nearDistRatio = distNearKm / distEdgeKm; // ~0.15
+  const medDistRatio = distMedKm / distEdgeKm; // ~0.50
+  const badDistRatio = distBadKm / distEdgeKm; // ~0.78
+  const normNearFactor = Math.max(0.70, 1 - Math.pow(nearDistRatio, 2));
+
+  const dlPeakCandidate = dlThrEdge + (dlThrNear - dlThrEdge) / normNearFactor;
+  const ulPeakCandidate = ulThrEdge + (ulThrNear - ulThrEdge) / normNearFactor;
+
+  const dlThrMedEff = isDataService
+    ? Number((dlThrEdge + (dlPeakCandidate - dlThrEdge) * (1 - Math.pow(medDistRatio, 2))).toFixed(1))
+    : dlThrMed;
+  const ulThrMedEff = isDataService
+    ? Number((ulThrEdge + (ulPeakCandidate - ulThrEdge) * (1 - Math.pow(medDistRatio, 2))).toFixed(1))
+    : ulThrMed;
+
+  const dlThrBadEff = isDataService
+    ? Number((dlThrEdge + (dlPeakCandidate - dlThrEdge) * (1 - Math.pow(badDistRatio, 2))).toFixed(1))
+    : dlThrBad;
+  const ulThrBadEff = isDataService
+    ? Number((ulThrEdge + (ulPeakCandidate - ulThrEdge) * (1 - Math.pow(badDistRatio, 2))).toFixed(1))
+    : ulThrBad;
+
   const fourPoints: FourPointOutput[] = [
     {
       pointName: 'Near Cell',
@@ -1546,8 +1597,8 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
       avgDlMcs: dlMcsStr[1],
       avgUlMcs: ulMcsStr[1],
       avgDlBlerPercent: blerMed,
-      dlThroughputMbps: Number((dlThrMed * (inputs.caEnabled ? caDlFactor : 1)).toFixed(1)),
-      ulThroughputMbps: Number((ulThrMed * (inputs.caEnabled ? caUlFactor : 1)).toFixed(1)),
+      dlThroughputMbps: Number((dlThrMedEff * (inputs.caEnabled ? caDlFactor : 1)).toFixed(1)),
+      ulThroughputMbps: Number((ulThrMedEff * (inputs.caEnabled ? caUlFactor : 1)).toFixed(1)),
       latencyMs: serviceResolved.targetLatencyMs !== undefined ? Number((serviceResolved.targetLatencyMs * 0.7).toFixed(1)) : latMed,
       dlMcs: dlCqiStr[1],
       ulMcs: ulModStr[1],
@@ -1566,8 +1617,8 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
       avgDlMcs: dlMcsStr[2],
       avgUlMcs: ulMcsStr[2],
       avgDlBlerPercent: blerBad,
-      dlThroughputMbps: dlThrBad,
-      ulThroughputMbps: ulThrBad,
+      dlThroughputMbps: dlThrBadEff,
+      ulThroughputMbps: ulThrBadEff,
       latencyMs: serviceResolved.targetLatencyMs !== undefined ? Number((serviceResolved.targetLatencyMs * 0.9).toFixed(1)) : latBad,
       dlMcs: dlCqiStr[2],
       ulMcs: ulModStr[2],
@@ -1592,12 +1643,8 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
       avgDlBlerPercent: serviceResolved.targetResidualBlerPercent,
       // Fixed-rate services (voice, NB-IoT) report their service rate; others the rate at the edge SINR,
       // never below the cell-edge service target the MAPL was dimensioned for
-      dlThroughputMbps: isFixedRateEdgeService
-        ? serviceResolved.targetDlThroughputMbps
-        : Math.max(serviceResolved.targetDlThroughputMbps, calculate3GPPThroughput(inputs.bandwidthMHz, sinrEdge, effectiveDlLayers, dlDutyCycle, false)),
-      ulThroughputMbps: isFixedRateEdgeService
-        ? serviceResolved.targetUlThroughputMbps
-        : Math.max(serviceResolved.targetUlThroughputMbps, calculate3GPPThroughput(inputs.bandwidthMHz, ulSinrEdge, effectiveUlLayers, ulDutyCycle, true)),
+      dlThroughputMbps: dlThrEdge,
+      ulThroughputMbps: ulThrEdge,
       latencyMs: serviceResolved.targetLatencyMs !== undefined ? serviceResolved.targetLatencyMs : latEdge,
       dlMcs: serviceResolved.serviceProfile === 'VONR_5G' || serviceResolved.serviceProfile === 'VOLTE_4G' ? 'QPSK (VoIP RoHC)' : dlCqiStr[3],
       ulMcs: serviceResolved.serviceProfile === 'VONR_5G' || serviceResolved.serviceProfile === 'VOLTE_4G' ? 'QPSK (VoIP)' : ulModStr[3],
@@ -1839,6 +1886,7 @@ export function calculateLinkBudget(inputs: LinkBudgetInputs): LinkBudgetCalcula
     coverageProbabilityType,
     coverageEdgeProbabilityPercent,
     coverageAreaProbabilityPercent,
+    effectiveGaussianZ: Number(getGaussianZ(coverageLevels.edge).toFixed(2)),
     pathLossExponentAtEdge: Number(coverageLevels.n.toFixed(2)),
     cascadeTable,
     caSummary: {
